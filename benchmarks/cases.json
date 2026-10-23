@@ -1,0 +1,28 @@
+{
+  "frozen": "2026-10-23",
+  "note": "Do not edit messages, apps or answer keys after the first graded run. New cases go into the next version.",
+  "scripted_reply": "Go ahead, you decide. I don't have more details to add.",
+  "cases": [
+    {
+      "id": "s1-pawsh-grooming",
+      "kind": "seeded",
+      "app": "benchmarks/cases/s1-pawsh-grooming/app",
+      "answer_key": "benchmarks/answer-keys/s1-pawsh-grooming.json",
+      "message": "This is my dog grooming booking site (folder app/, open app/index.html). Customers use it to book grooms online. Review it and tell me what's wrong and what I should fix first. Don't change any files."
+    },
+    {
+      "id": "s2-harvest-volunteers",
+      "kind": "seeded",
+      "app": "benchmarks/cases/s2-harvest-volunteers/app",
+      "answer_key": "benchmarks/answer-keys/s2-harvest-volunteers.json",
+      "message": "This is the tool our food bank staff use to fill volunteer shifts (folder app/, open app/index.html). Review it and tell me what's wrong and what I should fix first. Don't change any files."
+    },
+    {
+      "id": "c7-ivc-app",
+      "kind": "real",
+      "app": "benchmarks/cases/c7-ivc-app/app",
+      "answer_key": "benchmarks/answer-keys/c7-ivc-app.json",
+      "message": "This is my event registration desk app (folder app/, open app/index.html and sign in with a demo account). Volunteers use it at a desk on event day to register volunteers and their families. Review it and tell me what's wrong and what I should fix first. Don't change any files."
+    }
+  ]
+}

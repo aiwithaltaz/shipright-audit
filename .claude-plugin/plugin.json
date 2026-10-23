@@ -1,0 +1,13 @@
+{
+  "name": "shipright-audit",
+  "version": "0.1.0-beta.1",
+  "description": "Audits an existing app like an expert Staff Product Designer: a ranked pain map with evidence, Keeps, fixes and the test that proves each fix. Read-only.",
+  "author": {
+    "name": "Altaz Lavji",
+    "url": "https://github.com/aiwithaltaz"
+  },
+  "homepage": "https://github.com/aiwithaltaz/shipright-audit",
+  "repository": "https://github.com/aiwithaltaz/shipright-audit",
+  "license": "MIT",
+  "keywords": ["ux", "ux-audit", "product-design", "heuristic-evaluation", "accessibility", "design-review"]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "shipright-audit",
+  "version": "0.1.0-beta.1",
+  "description": "Audits an existing app like an expert Staff Product Designer: a ranked pain map with evidence, Keeps, fixes and tests. Read-only.",
+  "author": {
+    "name": "Altaz Lavji",
+    "url": "https://github.com/aiwithaltaz"
+  },
+  "homepage": "https://github.com/aiwithaltaz/shipright-audit",
+  "repository": "https://github.com/aiwithaltaz/shipright-audit",
+  "license": "MIT",
+  "keywords": ["ux", "ux-audit", "product-design", "accessibility"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ShipRight Audit",
+    "shortDescription": "Expert UX audit for apps you already built",
+    "longDescription": "Walks every screen and core task, names what works, finds each pain with evidence and cause, and ranks what to fix first. Changes nothing.",
+    "developerName": "Altaz Lavji",
+    "category": "Productivity",
+    "capabilities": ["Instructions"],
+    "websiteURL": "https://github.com/aiwithaltaz/shipright-audit",
+    "defaultPrompt": [
+      "Audit my app and tell me what to fix first.",
+      "Review the UX of this project. Don't change anything."
+    ]
+  }
+}

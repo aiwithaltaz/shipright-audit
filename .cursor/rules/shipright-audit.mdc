@@ -1,0 +1,9 @@
+---
+description: Use when the user asks to review, audit, critique or improve the UX of an app that already exists ("review my app", "what's wrong with it", "UX audit"). Read-only expert audit.
+globs:
+alwaysApply: false
+---
+
+Follow the ShipRight audit in `AGENTS.md` at the root of the shipright-audit repo (copy it into this project if it is not here).
+For the full version with references and scripts, use `skills/shipright-audit/SKILL.md`.
+Change nothing in the app. Every pain needs a screen, a screenshot, a cause and a severity. Name at least 3 things that work.

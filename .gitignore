@@ -1,0 +1,6 @@
+node_modules/
+runs/
+grades/
+benchmarks/hidden/
+benchmarks/results/*.json
+.DS_Store

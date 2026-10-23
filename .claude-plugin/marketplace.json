@@ -1,0 +1,16 @@
+{
+  "name": "shipright-audit",
+  "description": "UX audits for apps you already built, the way an expert Staff Product Designer does them.",
+  "owner": {
+    "name": "Altaz Lavji",
+    "url": "https://github.com/aiwithaltaz"
+  },
+  "plugins": [
+    {
+      "name": "shipright-audit",
+      "description": "Read-only UX audit: ranked pains with evidence, Keeps, fixes and tests.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
