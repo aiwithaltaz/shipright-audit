@@ -2,7 +2,8 @@
 // One command for every repo check: npm test (or node tests/run.mjs).
 // Runs the offline self-tests, manifest and skill checks, a style scan, and the seeded-app check
 // (the last one only when Playwright is installed).
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -46,8 +47,21 @@ ok('style scan (no em dashes or banned words)', bad.length === 0, bad.join(', ')
 // 5. Seeded apps still contain every planted pain and Keep (needs Playwright)
 let hasPw = false;
 try { createRequire(join(root, 'package.json'))('playwright'); hasPw = true; } catch {}
-if (hasPw) { r = run(['benchmarks/tools/verify-seeds.mjs']); ok('seeded apps match their answer keys', r.status === 0, r.stdout.trim().split('\n').pop()); }
-else ok('seeded apps match their answer keys', true, 'SKIPPED: Playwright not installed (npm i -D playwright)');
+if (hasPw) {
+  r = run(['benchmarks/tools/verify-seeds.mjs']);
+  ok('seeded apps match their answer keys', r.status === 0, r.stdout.trim().split('\n').pop());
+  // 6. Task walker: desktop finishes, phone breaks at the link that is hidden on phone
+  const out = mkdtempSync(join(tmpdir(), 'walk-test-'));
+  run(['skills/shipright-audit/scripts/walk.mjs', 'tests/fixtures/mini-app/index.html', 'tests/fixtures/walk-plan.json', '--out', out]);
+  const w = JSON.parse(readFileSync(join(out, 'walk.json'), 'utf8')).widths;
+  ok('walker finds a phone-only break', w['1280'].finished && w['1280'].actions === 3 && w['390'].broke_at === 1, `1280 ${w['1280'].finished ? 'finished' : 'broke'}, 390 broke at ${w['390'].broke_at}`);
+  // 7. Crawler flags two labels for one destination
+  const cout = mkdtempSync(join(tmpdir(), 'crawl-test-'));
+  run(['skills/shipright-audit/scripts/crawl.mjs', 'tests/fixtures/mini-app/index.html', '--out', cout]);
+  const c = JSON.parse(readFileSync(join(cout, 'crawl.json'), 'utf8'));
+  const drift = (c.label_drift || []).find(g => g.target.endsWith('#/form'));
+  ok('crawler flags label drift', !!drift && drift.labels.includes('Start order') && drift.labels.includes('Order now'), drift ? drift.labels.join(' / ') : 'none found');
+} else ok('seeded apps match their answer keys', true, 'SKIPPED: Playwright not installed (npm i -D playwright)');
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.name}${t.note ? `  (${t.note})` : ''}`);
 const failed = results.filter(t => !t.pass).length;

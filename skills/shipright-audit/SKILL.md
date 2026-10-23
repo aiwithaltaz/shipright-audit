@@ -58,6 +58,7 @@ Execute this script (do not read it as instructions):
 - `<skill>` is the folder that holds this SKILL.md.
 - It needs Node 18 or later and Playwright. If Playwright is missing, the script prints the install command and stops. Ask the owner before installing anything.
 - It saves every reachable screen at 390 and 1280 wide, with its H1, actions, form fields and console errors.
+- `crawl.md` also lists **label drift**: links that go to the same place under different words. Use it in Step 4.
 
 No script, no browser, or screenshots only? Visit or read each screen by hand and record the same fields. Mark every interactive check (keyboard, focus, timing) as Not verified.
 
@@ -71,6 +72,13 @@ From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. W
 
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note the step where it broke.
 
+The crawl only sees screens a link can reach. Steps inside a form or a flow need a walk. For each core task:
+
+1. Write a plan file, `docs/shipright/audit/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`).
+2. Execute `node <skill>/scripts/walk.mjs <index.html or url> docs/shipright/audit/walks/<task>.json --out docs/shipright/audit/walks/<task>`.
+3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
+4. Use those step screenshots as evidence for any pain inside the flow. If you could not walk a step (no script, a login you cannot pass), say so in Not verified instead of citing the code.
+
 Ask the big question first: does the product support the user's real job? A polished screen in the wrong flow is still a Blocker.
 
 ## Step 4: Pass 2, check each screen
@@ -80,6 +88,8 @@ Read `references/accessibility.md` and run its quick checks.
 If `<skill>/scripts/consistency.mjs` exists, execute it once per screen: `node <skill>/scripts/consistency.mjs <screen file or url>`. It flags the same label with two different colors and off-scale spacing. Compare labels and status colors across screens yourself.
 
 Keep pass 1 and pass 2 separate. Finish the walk before you judge single screens, so one does not bias the other.
+
+**Label drift.** Read the label drift table in `crawl.md`. It is a lead, not a verdict: a logo and a "Home" link, or a nav item with a count, are normal. It is a pain when a user could think two labels are two different actions (for example "Reserve", "Book now" and "Schedule" for one booking flow).
 
 **Independent reviewers.** One reviewer misses many problems. If your tool can start subagents, run 2 or 3 reviewers. Give each the same brief, screens and references, and do not let any of them see another's notes. Then merge their lists and record how many reviewers found each pain. If you cannot start subagents, write "Reviewers: 1" in the header.
 
@@ -108,13 +118,13 @@ Read `references/finding-examples.md` before you write. Each pain has:
 | 2 | Minor | Annoys some users; a workaround exists. |
 | 1 | Polish | Works, but looks or reads wrong. |
 
-Merge duplicates: one pain per cause, with all the screens it appears on. Do not pad the list with Polish to look thorough.
+**One problem per row.** Describe what happens in one sentence. If you need "and", a semicolon or a second sentence to add a different problem, that problem gets its own row. Duplicates are different: the same problem on several screens is one row that lists every screen. Do not pad the list with Polish to look thorough.
 
 ## Step 7: Find what is missing
 
 Check the page inventory: sign in, sign up, reset password, empty states, loading, error states, offline, 404, 500, settings, help, legal pages, emails.
 Check starting points: can users begin each core task from every place they would expect?
-A missing page that blocks a core task is a pain. Score it like any other.
+A missing page that blocks a core task is a pain. Score it like any other. If nothing is missing, write "None found" and list what you checked.
 
 ## Step 8: Rank and group
 
@@ -137,7 +147,8 @@ For each Now pain, write 2 fix options, pick one, name the principle behind it, 
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot, a heuristic or lens, a severity, one cause and a source.
-- [ ] No duplicate pains.
+- [ ] No duplicate pains, and one problem per row.
+- [ ] Missing has rows, or says "None found" with what was checked.
 - [ ] Every Now pain has a chosen fix, its principle and a test.
 - [ ] No pain is marked Reported unless the owner or a user said it.
 - [ ] Not verified lists everything you could not check.

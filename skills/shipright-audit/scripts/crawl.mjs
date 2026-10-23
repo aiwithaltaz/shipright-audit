@@ -52,6 +52,9 @@ function noteError(text) {
 }
 
 async function snapshot(page, id, signedIn) {
+  // Read every screen at desktop width; the phone screenshot below would otherwise leave the next read at 390.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.waitForTimeout(100);
   const facts = await page.evaluate(() => {
     const vis = el => {
       const r = el.getBoundingClientRect();
@@ -64,7 +67,8 @@ async function snapshot(page, id, signedIn) {
     const actions = [...document.querySelectorAll('a,button')].filter(vis).map(el => text(el)).filter(Boolean).slice(0, 40);
     const fields = [...document.querySelectorAll('input,select,textarea')].filter(vis).map(el => el.getAttribute('name') || el.getAttribute('aria-label') || el.id || el.type || 'field').slice(0, 40);
     const links = [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(Boolean);
-    return { h1, h2, actions, fields, links, title: document.title };
+    const linkLabels = [...document.querySelectorAll('a[href]')].filter(vis).map(a => ({ text: text(a), href: a.href })).filter(x => x.text);
+    return { h1, h2, actions, fields, links, linkLabels, title: document.title };
   });
   const route = new URL(page.url()).hash || '(no hash)';
   const shot = {};
@@ -74,7 +78,7 @@ async function snapshot(page, id, signedIn) {
     await page.screenshot({ path: join(outDir, file), fullPage: false });
     shot[vp.name] = file;
   }
-  return { id, url: page.url(), route, signed_in: signedIn, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, shots: shot, console_errors: errors.slice() };
+  return { id, url: page.url(), route, signed_in: signedIn, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, shots: shot, console_errors: errors.slice() };
 }
 
 async function signIn(page) {
@@ -156,12 +160,28 @@ try {
   if (server) server.close();
 }
 
-const report = { target, screens: screens.map(({ links, ...rest }) => rest) };
+// Label drift: links that go to the same place under different words ("Reserve", "Book now", "Schedule").
+// The home route is skipped, because a logo and a "Home" link sharing it is a normal pattern.
+const byTarget = new Map();
+for (const s of screens) for (const l of s.link_labels || []) {
+  const t = l.href.replace(/\/$/, '');
+  if (/(#\/?|\/index\.html)$/.test(t) || /^[a-z]+:\/\/[^/]+$/.test(t)) continue;
+  if (!byTarget.has(t)) byTarget.set(t, new Map());
+  const key = l.text.toLowerCase();
+  if (!byTarget.get(t).has(key)) byTarget.get(t).set(key, { label: l.text, screens: new Set() });
+  byTarget.get(t).get(key).screens.add(s.id);
+}
+const labelDrift = [...byTarget].filter(([, m]) => m.size > 1).map(([t, m]) => ({ target: t, labels: [...m.values()].map(v => v.label), where: Object.fromEntries([...m.values()].map(v => [v.label, [...v.screens]])) }));
+const report = { target, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
   md.push(`| ${s.id} | ${s.route} | ${s.signed_in ? 'yes' : 'no'} | ${s.h1.replace(/\|/g, '/')} | ${s.actions.length} | ${s.fields.length} | ${s.console_errors.length} |`);
 }
+if (labelDrift.length) {
+  md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
+  for (const d of labelDrift) md.push(`| ${d.target.replace(/^https?:\/\/[^/]+/, '')} | ${d.labels.join(' / ')} | ${Object.entries(d.where).map(([l, ss]) => `${l}: ${ss.join(', ')}`).join('; ')} |`);
+}
 writeFileSync(join(outDir, 'crawl.md'), md.join('\n') + '\n');
 if (wantJson) console.log(JSON.stringify(report));
-else console.log(`crawl: ${report.screens.length} screens in ${outDir}`);
+else console.log(`crawl: ${report.screens.length} screens in ${outDir}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);

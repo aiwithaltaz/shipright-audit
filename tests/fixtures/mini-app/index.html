@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini shop</title>
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  @media (max-width: 700px) { .desktop-only { display: none; } }
+</style>
+</head>
+<body>
+<nav><a href="#/">Home</a> <a class="desktop-only" href="#/form">Start order</a> <a href="#/form">Order now</a></nav>
+<main id="app"></main>
+<script>
+  const app = document.getElementById('app');
+  function render() {
+    const r = location.hash || '#/';
+    if (r === '#/form') app.innerHTML = '<h1>Your order</h1><label for="n">Name</label> <input id="n"><button id="next">Next</button>';
+    else if (r === '#/done') app.innerHTML = '<h1>Thanks</h1><p>Order placed.</p>';
+    else app.innerHTML = '<h1>Mini shop</h1>';
+  }
+  app.addEventListener('click', e => { if (e.target.id === 'next') location.hash = '#/done'; });
+  addEventListener('hashchange', render); render();
+</script>
+</body>
+</html>

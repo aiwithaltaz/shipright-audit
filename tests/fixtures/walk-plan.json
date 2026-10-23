@@ -1,0 +1,10 @@
+{
+  "task": "Place an order",
+  "steps": [
+    { "do": "click", "text": "Start order" },
+    { "do": "fill", "field": "Name", "value": "Ana" },
+    { "do": "note", "text": "Only one field, fine" },
+    { "do": "click", "text": "Next" },
+    { "do": "expect", "text": "Thanks" }
+  ]
+}

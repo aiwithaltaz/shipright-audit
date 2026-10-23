@@ -62,7 +62,15 @@ export function check(md) {
     const cause = cell(pains, r, 'cause').toLowerCase();
     if (!CAUSES.includes(cause)) errors.push(`Pains ${id}: cause "${cause || 'empty'}" must be one of: ${CAUSES.join(', ')}.`);
     if (!/^(found|reported)\b/i.test(cell(pains, r, 'source'))) errors.push(`Pains ${id}: source must start with Found or Reported.`);
+    // One problem per row. Quotes, code and parentheses are ignored, so quoting the app's own text is fine.
+    const what = cell(pains, r, 'what happens').replace(/"[^"]*"|\u201c[^\u201d]*\u201d|`[^`]*`|\([^)]*\)/g, ' ');
+    if (what.includes(';')) errors.push(`Pains ${id}: "What happens" joins problems with ";". Give each problem its own row.`);
+    const sentences = what.split(/[.!?]+(?:\s+|$)/).filter(x => x.trim().length > 2).length;
+    if (sentences > 2) errors.push(`Pains ${id}: "What happens" has ${sentences} sentences. Describe one problem in one sentence (two at most); split the rest into new rows.`);
   }
+
+  const missingRows = table(sections['Missing'] || []).rows;
+  if (sections['Missing'] && !missingRows.length && !/none found/i.test((sections['Missing'] || []).join('\n'))) errors.push('Missing: no rows. Check the page inventory and list what is missing, or write "None found" with what you checked.');
 
   const fix = table(sections['Fix map'] || []);
   const nowIds = [];
@@ -142,9 +150,11 @@ Context used: none given
     .replace('| P02 | No phone nav | Header, screens/home-390.png | Phone users | H3 | Blocker | layout | Found, by 2 of 2 reviewers |', '| P01 | No phone nav | Header | Phone users |  | High | navigation | Guess |')
     .replace('| B | Prevent errors | Earliest slot is valid |', '| B |  |  |')
     .replace('Reviewers: 1', 'Reviewer count: 1')
-    .replace('- Screen reader behavior', '');
+    .replace('- Screen reader behavior', '')
+    .replace('| P01 | Rule shown late |', '| P01 | Rule shown late; no Back button. Users lose work. Cancel wipes it. |')
+    .replace('| 404 | Lost users | |', '');
   const g = check(good), b = check(bad);
-  const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified'];
+  const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);
