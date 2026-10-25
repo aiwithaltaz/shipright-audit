@@ -8,6 +8,7 @@
 // The file holds login cookies: keep it out of git, and delete it when the audit is done.
 // Exit 0 saved, 1 not signed in before the timeout, 2 usage or no screen to open a window on.
 import { createRequire } from 'node:module';
+import { launch } from './browser.mjs';
 import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 
@@ -31,7 +32,7 @@ if (!headless && process.platform === 'linux' && !process.env.DISPLAY && !proces
 }
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch({ headless });
+const browser = await launch(chromium, { headless });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const page = await context.newPage();
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });

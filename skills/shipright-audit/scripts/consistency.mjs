@@ -6,6 +6,7 @@
 // badge colors that are not a hex token from --tokens, and label-table misses.
 // Exit 0 pass, 1 fail, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
+import { launch } from './browser.mjs';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep } from 'node:path';
@@ -52,7 +53,7 @@ function serve(dir) {
 }
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const browser = await launch(chromium, { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 let server;
 try {

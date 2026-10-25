@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2-beta.1 (2026-10-25)
+
+From the Content Desk rerun on a Windows preview build, where Playwright's Chromium would not start ("side-by-side configuration is incorrect").
+- **Browser fallback:** every script now tries Playwright's Chromium, then the installed Microsoft Edge, then Google Chrome, and says which one it used. Force one with `SHIPRIGHT_BROWSER=msedge` or `chrome`.
+- **The audit offers to run commands for the owner** (like the sign-in window) instead of asking them to use a terminal.
+
 ## 0.3.1-beta.1 (2026-10-25)
 
 - Commands shown to the owner now use the real folder path, not `<skill>`.

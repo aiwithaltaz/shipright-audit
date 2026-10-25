@@ -62,6 +62,9 @@ if (hasPw) {
   const c = JSON.parse(readFileSync(join(cout, 'crawl.json'), 'utf8'));
   const drift = (c.label_drift || []).find(g => g.target.endsWith('#/form'));
   ok('crawler flags label drift', !!drift && drift.labels.includes('Start order') && drift.labels.includes('Order now'), drift ? drift.labels.join(' / ') : 'none found');
+  // 7b. Browser fallback: a browser that cannot start must not stop the audit
+  const fb = spawnSync(process.execPath, ['skills/shipright-audit/scripts/crawl.mjs', 'tests/fixtures/mini-app/index.html', '--out', mkdtempSync(join(tmpdir(), 'fallback-'))], { cwd: root, encoding: 'utf8', env: { ...process.env, SHIPRIGHT_BROWSER: 'msedge' } });
+  ok('scripts fall back when a browser will not start', fb.status === 0 && /crawl: \d+ screens/.test(fb.stdout), fb.status === 0 ? (fb.stderr.trim().split('\n').pop() || 'Edge started') : `exit ${fb.status}`);
   // 8. Visual checker: every planted kind on the dev fixture, and no false alarms on a busy app
   const vout = mkdtempSync(join(tmpdir(), 'visual-test-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'tests/fixtures/visual-app/index.html', '--out', vout]);

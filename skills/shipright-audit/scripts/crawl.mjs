@@ -9,6 +9,7 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
+import { launch } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -115,7 +116,7 @@ function sameApp(href, base) {
 }
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch({
+const browser = await launch(chromium, {
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
 const context = await browser.newContext(session ? { storageState: session } : {});

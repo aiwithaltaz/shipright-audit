@@ -20,6 +20,7 @@
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
+import { launch } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -152,7 +153,7 @@ async function walkAt(browser, startUrl, width) {
 const h1 = page => page.locator('h1').first().innerText({ timeout: 1000 }).then(t => t.replace(/\s+/g, ' ').trim().slice(0, 120)).catch(() => '');
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch();
+const browser = await launch(chromium, {}, 'walk');
 let server, startUrl = target;
 if (!remote) {
   server = await serve(root);

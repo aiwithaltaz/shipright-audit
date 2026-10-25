@@ -13,6 +13,7 @@
 // Writes visual.json, visual.md and V##-*.png crops to --out (default docs/shipright/audit/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
+import { launch } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -235,7 +236,7 @@ async function openMenus(page, routeId, startFinding) {
 }
 
 const { chromium } = loadPlaywright();
-const browser = await chromium.launch();
+const browser = await launch(chromium, {}, 'visual');
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(session ? { storageState: session } : {}) });
 const page = await context.newPage();
 let server, startUrl = target;

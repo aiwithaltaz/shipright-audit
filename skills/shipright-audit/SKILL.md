@@ -47,7 +47,7 @@ Audit progress:
 
 Settle these before any audit work, in **one** message, and skip what you already know. Finding out late costs the owner an hour.
 
-1. **Way in.** A URL, a local path, or screenshots. If the app needs a login, recommend this: the owner runs `node <skill>/scripts/login.mjs <url>`, signs in in the browser window it opens, and the session is saved to `docs/shipright/audit/.session.json`. You never see or type the password.
+1. **Way in.** A URL, a local path, or screenshots. If the app needs a login, offer to run `node <skill>/scripts/login.mjs <url>` for the owner: a browser window opens on their screen, they sign in there, and the session is saved to `docs/shipright/audit/.session.json`. You never see or type the password. Most owners do not use a terminal, so run commands for them instead of asking them to.
 2. **Realistic data.** Ask for an account that holds real-looking data. Empty screens hide density, pill and alignment problems, which are often the ones owners care about most.
 3. **Tools.** The scripts need Node 18+ and Playwright. If Playwright is missing, ask once: "May I install Playwright (`npm i -D playwright && npx playwright install chromium`)?" In an empty audit folder this is safe. Inside the app's own project, say that it will change `package.json`.
 4. **Safety.** Say what you will and will not click (the "guest in a live app" rule), and ask if any extra action is allowed, such as submitting a form with a wrong password.
@@ -64,6 +64,7 @@ If the owner says "go" or does not answer, start, and say which reading you took
 `node <skill>/scripts/crawl.mjs <index.html or url> [--session docs/shipright/audit/.session.json] --out docs/shipright/audit/screens`
 
 - It saves every reachable screen at 390 and 1280 wide, with its H1, actions, form fields and console errors.
+- If Playwright's own browser will not start, every script falls back to the installed Microsoft Edge, then Google Chrome. To force one, set `SHIPRIGHT_BROWSER=msedge` (or `chrome`).
 - `crawl.md` flags a **login wall**, **mostly empty** screens, and **label drift** (links that go to the same place under different words).
 - If Playwright cannot be used, visit each screen by hand. Your own browser may be narrow: record the width you actually saw, and put any width you did not see in Not verified.
 

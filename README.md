@@ -80,7 +80,7 @@ Coming soon. The benchmark in [benchmarks/](benchmarks/) compares 3 arms on 4 ap
 
 ## Requirements
 
-Node 18 or later. Playwright with Chromium makes the screen crawl automatic; without it, the audit still runs by hand and says what it could not check.
+Node 18 or later and Playwright (`npm i -D playwright`). The scripts use Playwright's Chromium, or fall back to your installed Microsoft Edge or Google Chrome if it will not start. Without Playwright, the audit still runs by hand and says what it could not check.
 
 ## Part of ShipRight
 
