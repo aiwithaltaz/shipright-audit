@@ -11,7 +11,7 @@ Find what works, what hurts and why, and what to fix first. Every claim has evid
 
 Output: `docs/shipright/audit/pain-map.md` and a short reply.
 In this skill, a problem is always called a **pain**. A thing that works is always called a **Keep**.
-`<skill>` is the folder that holds this SKILL.md. Execute the scripts in `<skill>/scripts/`; do not read them as instructions.
+`<skill>` is the folder that holds this SKILL.md. Execute the scripts in `<skill>/scripts/`; do not read them as instructions. When you show the owner a command, write the real folder path, never `<skill>`.
 
 ## Progress checklist
 

@@ -21,7 +21,6 @@ h1 { font-size: 26px; margin: 0 0 4px; }
 #nav a.current { background: #e9effc; color: var(--accent); font-weight: 600; }
 .count { background: #e4e7ec; border-radius: 999px; padding: 0 8px; font-size: 12px; }
 .filter-wrap { margin-left: auto; position: relative; }
-/* The filter menu opens upward from a fixed corner so it meets the bulk bar */
 .dropdown { display: none; position: fixed; right: 28px; bottom: 30px; width: 240px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(0,0,0,.14); border-radius: 0; padding: 6px; z-index: 20; }
 .dropdown.open { display: block; }
 .dropdown a { display: block; padding: 10px 12px; color: var(--ink); text-decoration: none; }

@@ -3,8 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Recipe Box (test fixture)</title>
-<!-- Dev-only fixture for the visual.mjs tests. Planted problems are marked PLANT. Never used in the benchmark. -->
+<title>Recipe Box</title>
 <style>
   :root { --r: 12px; --line: #dcdcdc; --ink: #1b1b1b; --muted: #555; }
   * { box-sizing: border-box; }
@@ -14,7 +13,6 @@
   .count { background: #eee; border-radius: 999px; padding: 0 8px; font-size: 12px; }
   .account { margin-left: auto; position: relative; }
   .account button { border: 1px solid var(--line); background: #fff; border-radius: var(--r); padding: 8px 12px; cursor: pointer; }
-  /* PLANT: sharp-cornered menu among rounded surfaces */
   .menu { display: none; position: fixed; left: 24px; bottom: 40px; width: 220px; background: #fff; border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0,0,0,.15); border-radius: 0; z-index: 10; padding: 8px; }
   .menu.open { display: block; }
   .menu a { display: block; padding: 10px; color: var(--ink); text-decoration: none; }
@@ -28,12 +26,9 @@
   .btn { border: 0; background: #1b1b1b; color: #fff; border-radius: var(--r); padding: 8px 14px; cursor: pointer; font-size: 14px; }
   .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   .pill { background: #e7eefc; color: #1d3f8f; border-radius: 999px; padding: 2px 10px; font-size: 12px; height: 22px; line-height: 18px; white-space: nowrap; }
-  /* PLANT: one card's date is pushed right, so dates do not line up across the row */
   .card.odd .date { padding-left: 18px; }
-  /* PLANT: a big empty gap above the footer of every card in the second group */
   .list .card p { margin-bottom: 84px; }
   .list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 32px; }
-  /* PLANT: fixed composer that sits on top of the menu */
   .composer { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #fff; border-top: 1px solid var(--line); z-index: 50; padding: 16px 24px; }
   .composer textarea { width: 100%; height: 80px; border: 1px solid var(--line); border-radius: var(--r); padding: 10px; font: inherit; }
 </style>
@@ -41,7 +36,6 @@
 <body>
 <nav aria-label="Main">
   <a href="#/">Recipes <span class="count">3</span></a>
-  <!-- PLANT: the count says 12 but the Saved page is empty -->
   <a href="#/saved">Saved <span class="count">12</span></a>
   <div class="account">
     <button aria-haspopup="menu" aria-expanded="false" id="acct">Account</button>
@@ -57,7 +51,6 @@
     if (location.hash === '#/saved') { app.innerHTML = '<h1>Saved</h1><p>No saved recipes yet. Save one from Recipes.</p>'; return; }
     app.innerHTML = '<h1>Recipes</h1><section class="grid">'
       + card('Lemon pasta', 'Oct 12, 2026', false, ['Quick', 'Vegetarian'])
-      // PLANT: a sentence used as a pill, and a card crowded with pills
       + card('Tomato soup', 'Oct 10, 2026', true, ['This recipe was generated from your saved notes last week'])
       + card('Fried rice', 'Oct 8, 2026', false, ['Quick', 'Rice', 'Spicy', 'Leftovers', 'Wok', 'Dinner'])
       + '</section><section class="list">' + card('Bean chili', 'Sep 30, 2026') + card('Pancakes', 'Sep 28, 2026') + '</section>';

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1-beta.1 (2026-10-25)
+
+- Commands shown to the owner now use the real folder path, not `<skill>`.
+- Removed source comments that hinted at planted problems from benchmark case s3 and from the visual test fixture. An audit that reads source code must not be told the answers. No graded run had used s3 yet.
+
 ## 0.3.0-beta.1 (2026-10-25)
 
 From the first audit of a real, signed-in app. The owner listed 9 problems before the run; the audit found 0 of them (all 7 of its own top findings were confirmed real). It was strong on flows and wording and blind to visual craft. This version targets that gap and the access problems behind it.
