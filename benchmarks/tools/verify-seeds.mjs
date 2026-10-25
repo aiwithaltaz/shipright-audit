@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Prove every planted pain and Keep still exists in the seeded apps.
-// Usage: node benchmarks/tools/verify-seeds.mjs [s1|s2]
+// Usage: node benchmarks/tools/verify-seeds.mjs [s1|s2|s3]
 // Run it after any edit to a seeded app. A failing check means the answer key no longer matches the app.
 // Needs Node 18+ and Playwright with Chromium. Exit 0 all pass, 1 any fail, 2 missing Playwright.
 import { createRequire } from 'node:module';
@@ -153,10 +153,56 @@ async function s2(browser) {
   }
 }
 
+async function s3(browser) {
+  const url = pathToFileURL(resolve(caseDir('s3-northwind-maintenance'), 'index.html')).href;
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  const go = async h => { await page.goto(url + h); await page.waitForTimeout(80); };
+  const text = () => page.locator('#app').innerText();
+
+  await go('#/requests');
+  const pillTexts = await page.locator('.pill').allInnerTexts();
+  check('S3-P01', pillTexts.some(t => t.split(' ').length > 4), 'sentence pill');
+  check('S3-P02', await page.evaluate(() => Math.max(...[...document.querySelectorAll('.card .pills')].map(p => p.children.length))) >= 7, '7 pills on a card');
+  const nums = await page.evaluate(() => [...document.querySelectorAll('.card')].slice(0, 3).map(c => { const d = c.querySelector('.date').getBoundingClientRect(); return d.top; }));
+  check('S3-P04', Math.max(...nums) - Math.min(...nums) > 6, 'dates at different heights in row 1');
+  check('S3-P06', await page.evaluate(() => [...document.querySelectorAll('.card')].every(c => c.lastElementChild.textContent.includes('Assign vendor'))), 'Assign vendor is last in every card');
+  check('S3-P07', await page.locator('.card').first().locator('.facts > div').count() >= 7, '7 detail lines per card');
+  check('S3-P11', (await page.locator('.date').first().evaluate(new Function('return ' + contrastJs)())) < 4.5, 'faint dates');
+  check('S3-P12', await page.evaluate(() => [...document.querySelectorAll('.iconbtn')].every(b => !b.getAttribute('aria-label') && !b.title && !/[a-z]/i.test(b.textContent))), 'icon buttons without names');
+  check('S3-P13', await page.locator('.bulkbar').isVisible() && await page.locator('#app input[type=checkbox]').count() === 0, 'bulk bar, nothing to select');
+  const openReq = await page.locator('.pill.open-req').first().evaluate(e => getComputedStyle(e).backgroundColor);
+  check('S3-K1', /\d+ open requests · \d+ overdue/.test(await text()), 'situation line');
+  check('S3-K4', await page.locator('#nav a.current').count() === 1, 'current nav item');
+
+  await page.click('#filter'); await page.waitForTimeout(100);
+  const m = await page.evaluate(() => {
+    const el = document.getElementById('filter-menu'), r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.bottom - 6);
+    return { radius: parseFloat(getComputedStyle(el).borderTopLeftRadius), covered: !!top && !el.contains(top) };
+  });
+  check('S3-P08', m.radius === 0, 'square filter menu');
+  check('S3-P09', m.covered, 'menu covered by the bottom bar');
+
+  check('S3-P03a', (await page.locator('#nav a', { hasText: 'Urgent' }).innerText()).includes('5'), 'Urgent shows 5');
+  await go('#/urgent');
+  check('S3-P03', /no urgent requests/i.test(await text()), 'Urgent page is empty');
+
+  await go('#/properties');
+  const openProp = await page.locator('.pill.open-prop').first().evaluate(e => getComputedStyle(e).backgroundColor);
+  check('S3-P10', openReq !== openProp, 'Open has two colors');
+  check('S3-P05', await page.evaluate(() => { const c = document.querySelector('.prop'); const a = c.querySelector('.addr').getBoundingClientRect(), b = c.querySelector('.bar').getBoundingClientRect(); return b.top - a.bottom; }) > 60, 'big gap in property card');
+  check('S3-K3', /\d+ of \d+ units leased/.test(await text()) && await page.locator('.bar').count() >= 3, 'occupancy bars');
+  check('S3-P13b', await page.locator('.bulkbar').isVisible(), 'bulk bar on Properties');
+
+  await go('#/vendors');
+  check('S3-K2', await page.locator('a[href^="tel:"]').count() >= 4, 'tap-to-call vendors');
+}
+
 const browser = await chromium.launch();
 try {
   if (!only || only === 's1') await s1(browser);
   if (!only || only === 's2') await s2(browser);
+  if (!only || only === 's3') await s3(browser);
 } finally { await browser.close(); }
 
 const failed = results.filter(r => !r.ok);

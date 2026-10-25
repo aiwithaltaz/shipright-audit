@@ -4,7 +4,7 @@
 
 Built for apps people already shipped with Cursor, Lovable, Claude Code, Replit and friends: they work, but they feel clunky, and nobody can say exactly why.
 
-> **Status: v0.1 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
+> **Status: v0.3 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
 
 ## Install
 
@@ -24,6 +24,8 @@ Then audit an app:
 ```
 
 or just ask: *"Review my app and tell me what to fix first."*
+
+**App behind a login?** The audit asks first. You sign in yourself in a real browser window (`login.mjs`) and it reuses that session; it never sees your password. Use an account with realistic data: empty screens hide the problems you care about.
 
 Cursor, Codex, Antigravity, Copilot, Windsurf and others: see [INSTALL.md](INSTALL.md).
 
@@ -48,27 +50,29 @@ Then the reply, in this order:
 
 It follows the method expert designers use, one rung at a time:
 
-0. **Scope** deep, not wide: the 3 to 5 core tasks
-1. **Reach every screen** at phone and desktop width (`crawl.mjs`)
+0. **Way in first:** sign-in, realistic data, tools and what it will not click, settled in one message
+1. **Reach every screen** at phone and desktop width (`crawl.mjs`), and flag a login wall or empty screens
 2. **Name the core tasks** as user goals
-3. **Pass 1: walk each task** as a first-time user, counting steps and dead ends
+3. **Pass 1: walk each task** as a first-time user, screenshotting every step at both widths (`walk.mjs`)
 4. **Pass 2: check each screen** against the 10 usability heuristics, layout and hierarchy, work-screen rules and WCAG 2.2 AA basics, with independent reviewers when your tool supports subagents
-5. **Name what works** (at least 3 Keeps)
-6. **Write each pain** with evidence, the heuristic it breaks, severity and cause
-7. **Find what is missing** (empty states, errors, 404, recovery paths)
-8. **Rank** by impact, confidence and effort, then group into themes
-9. **Gate:** `check-stage.mjs` refuses a pain map with missing evidence, causes or tests
+5. **Pass 3: visual craft:** pills, counts, density, alignment, spacing, corner shape and layering (`visual.mjs` measures most of them)
+6. **Name what works** (at least 3 Keeps)
+7. **Write each pain** with evidence, the heuristic it breaks, severity and cause
+8. **Find what is missing** (empty states, errors, 404, recovery paths)
+9. **Rank** by impact, confidence and effort, then group into themes
+10. **Gate:** `check-stage.mjs` refuses a pain map with missing evidence, screenshots that do not exist, causes or tests
 
 ## What it will not do
 
 - Edit, install into, deploy or push your app
+- Publish, post, send, delete, pay or connect anything in your live app without asking. It tells you everything it created and offers to clean up
 - Invent user quotes, complaints or numbers
 - Replace real users: expert findings are predictions, so it tells you which 3 to test
 - Replace a full accessibility audit: it runs the quick checks and says what it could not verify
 
 ## Results
 
-Coming soon. The benchmark in [benchmarks/](benchmarks/) compares 3 arms on 3 apps with answer keys:
+Coming soon. The benchmark in [benchmarks/](benchmarks/) compares 3 arms on 4 apps with answer keys:
 
 - **No skill**, a **careful one-paragraph prompt**, and **shipright-audit**. Beating the careful prompt is the real test.
 - **Blind grading** by 2 graders from different model families, checked against hidden control reviews and human labels.

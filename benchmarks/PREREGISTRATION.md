@@ -6,10 +6,10 @@ Why this file exists: deciding the pass bars after seeing results lets anyone (i
 
 ## What we test
 
-- **Cases:** s1-pawsh-grooming (seeded), s2-harvest-volunteers (seeded), c7-ivc-app (real). Plus 2 hidden cases before any public claim.
-- **Models:** haiku, sonnet, opus (high effort). 9 case-model cells on the 3 known cases.
+- **Cases:** s1-pawsh-grooming (seeded), s2-harvest-volunteers (seeded), s3-northwind-maintenance (seeded, visual craft), c7-ivc-app (real). Plus 2 hidden cases before any public claim.
+- **Models:** haiku, sonnet, opus (high effort). 12 case-model cells on the 4 known cases.
 - **Arms:** a-plain (no skill), b-careful (strong prompt), c-skill (shipright-audit).
-- **Runs:** 5 per cell and arm (135 runs). The 1-run smoke test only checks the harness; its numbers are never quoted.
+- **Runs:** 5 per cell and arm (180 runs). The 1-run smoke test only checks the harness; its numbers are never quoted.
 - **Graders:** 2 per run, from 2 different model families, neither the same family as the run where possible.
 
 ## Primary question
@@ -48,8 +48,13 @@ If a check fails, fix the grader (prompt or model) and regrade everything. Do no
 
 ## Power note
 
-With 9 cells, the sign test needs at least 8 wins of 9 to reach p below 0.05 (9 of 9 gives p = 0.004; 7 of 9 gives p = 0.18). With fewer cells, read the intervals and do not quote p values.
+With 12 cells, the sign test needs at least 10 wins of 12 to reach p below 0.05 (10 of 12 gives p = 0.039; 9 of 12 gives p = 0.146). With fewer cells, read the intervals and do not quote p values.
 
 ## Frozen inputs
 
 Repo commit and skill hash are written into each run's RUN.json by prepare.mjs. Results must quote both.
+
+## Amendment, 2026-10-25 (before any graded run)
+
+Added s3-northwind-maintenance, a seeded visual-craft case, after the first real-app dogfood (the owner's own app) showed the skill missed visual problems the owner saw. Its key was written before any skill run on it. No pass bar changed. Bias note: s3 was written after the skill's visual lens existed, by the same author, so it likely favors the skill even more than s1 and s2.
+

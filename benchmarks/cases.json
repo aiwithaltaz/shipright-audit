@@ -18,6 +18,13 @@
       "message": "This is the tool our food bank staff use to fill volunteer shifts (folder app/, open app/index.html). Review it and tell me what's wrong and what I should fix first. Don't change any files."
     },
     {
+      "id": "s3-northwind-maintenance",
+      "kind": "seeded",
+      "app": "benchmarks/cases/s3-northwind-maintenance/app",
+      "answer_key": "benchmarks/answer-keys/s3-northwind-maintenance.json",
+      "message": "This is the tool I use to track maintenance requests across my rental properties (folder app/, open app/index.html). Review it and tell me what's wrong and what I should fix first. Don't change any files."
+    },
+    {
       "id": "c7-ivc-app",
       "kind": "real",
       "app": "benchmarks/cases/c7-ivc-app/app",

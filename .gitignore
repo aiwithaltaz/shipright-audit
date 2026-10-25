@@ -4,3 +4,5 @@ grades/
 benchmarks/hidden/
 benchmarks/results/*.json
 .DS_Store
+*.session.json
+.session.json

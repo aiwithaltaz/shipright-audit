@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Visit every reachable screen of a local app or URL.
-// Usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--json]
+// Usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--session session.json] [--json]
+// --session: a signed-in session saved by login.mjs, so the crawl can reach screens behind the login.
+// Also reports a login wall (every screen asks for a password) and empty screens (little or no data).
 // <skill> is the folder that holds SKILL.md.
 // Saves shots at 390 and 1280, the H1, actions, fields, and console errors.
 // Signs in with a demo account when a login form is offered. Skips accounts that say unapproved or denied.
@@ -20,13 +22,15 @@ function loadPlaywright() {
 }
 
 const args = process.argv.slice(2);
-const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out');
+const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
 if (!target) {
-  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--json]');
+  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--session session.json] [--json]');
   process.exit(2);
 }
 const flag = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const wantJson = args.includes('--json');
+const session = flag('--session');
+if (session && !existsSync(session)) { console.error(`crawl: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
 const remote = /^https?:/.test(target);
 const pagePath = remote ? null : resolve(target);
 const root = remote ? null : (existsSync(pagePath) && statSync(pagePath).isDirectory() ? pagePath : dirname(pagePath));
@@ -68,7 +72,10 @@ async function snapshot(page, id, signedIn) {
     const fields = [...document.querySelectorAll('input,select,textarea')].filter(vis).map(el => el.getAttribute('name') || el.getAttribute('aria-label') || el.id || el.type || 'field').slice(0, 40);
     const links = [...document.querySelectorAll('a[href]')].map(a => a.getAttribute('href')).filter(Boolean);
     const linkLabels = [...document.querySelectorAll('a[href]')].filter(vis).map(a => ({ text: text(a), href: a.href })).filter(x => x.text);
-    return { h1, h2, actions, fields, links, linkLabels, title: document.title };
+    const password = [...document.querySelectorAll('input[type=password]')].some(vis);
+    const main = document.querySelector('main') || document.body;
+    const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
+    return { h1, h2, actions, fields, links, linkLabels, password, empty, title: document.title };
   });
   const route = new URL(page.url()).hash || '(no hash)';
   const shot = {};
@@ -78,7 +85,7 @@ async function snapshot(page, id, signedIn) {
     await page.screenshot({ path: join(outDir, file), fullPage: false });
     shot[vp.name] = file;
   }
-  return { id, url: page.url(), route, signed_in: signedIn, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, shots: shot, console_errors: errors.slice() };
+  return { id, url: page.url(), route, signed_in: signedIn || !!session, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, asks_password: facts.password, looks_empty: facts.empty, shots: shot, console_errors: errors.slice() };
 }
 
 async function signIn(page) {
@@ -111,7 +118,8 @@ const { chromium } = loadPlaywright();
 const browser = await chromium.launch({
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
 });
-const page = await browser.newPage();
+const context = await browser.newContext(session ? { storageState: session } : {});
+const page = await context.newPage();
 page.on('console', msg => { if (msg.type() === 'error') noteError(msg.text()); });
 page.on('pageerror', err => noteError(err.message));
 
@@ -172,16 +180,20 @@ for (const s of screens) for (const l of s.link_labels || []) {
   byTarget.get(t).get(key).screens.add(s.id);
 }
 const labelDrift = [...byTarget].filter(([, m]) => m.size > 1).map(([t, m]) => ({ target: t, labels: [...m.values()].map(v => v.label), where: Object.fromEntries([...m.values()].map(v => [v.label, [...v.screens]])) }));
-const report = { target, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+const loginWall = screens.length > 0 && screens.every(s => s.asks_password || /login|sign-?in|signup|sign-?up|register|auth/i.test(s.route + s.url));
+const emptyScreens = screens.filter(s => s.looks_empty).length;
+const report = { target, signed_in_session: !!session, login_wall: loginWall, empty_screens: emptyScreens, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
   md.push(`| ${s.id} | ${s.route} | ${s.signed_in ? 'yes' : 'no'} | ${s.h1.replace(/\|/g, '/')} | ${s.actions.length} | ${s.fields.length} | ${s.console_errors.length} |`);
 }
+if (loginWall) md.splice(1, 0, '', '> **Login wall:** every screen reached asks for a password. Stop and ask the owner for a way in (login.mjs), or audit only the sign-in screens and say so.');
+if (emptyScreens && emptyScreens * 2 >= screens.length) md.splice(1, 0, '', `> **Mostly empty:** ${emptyScreens} of ${screens.length} screens show little or no data. Density, pill and alignment problems hide on empty screens. Ask for an account with realistic data.`);
 if (labelDrift.length) {
   md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
   for (const d of labelDrift) md.push(`| ${d.target.replace(/^https?:\/\/[^/]+/, '')} | ${d.labels.join(' / ')} | ${Object.entries(d.where).map(([l, ss]) => `${l}: ${ss.join(', ')}`).join('; ')} |`);
 }
 writeFileSync(join(outDir, 'crawl.md'), md.join('\n') + '\n');
 if (wantJson) console.log(JSON.stringify(report));
-else console.log(`crawl: ${report.screens.length} screens in ${outDir}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);
+else console.log(`crawl: ${report.screens.length} screens in ${outDir}${session ? ' (signed in)' : ''}${loginWall ? ' · LOGIN WALL: every screen asks for a password' : ''}${emptyScreens ? ` · ${emptyScreens} empty screen(s)` : ''}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);

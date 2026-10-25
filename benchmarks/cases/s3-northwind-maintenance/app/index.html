@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Rentals · Maintenance</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <span class="brand">Northwind Rentals</span>
+  <nav aria-label="Main" id="nav"></nav>
+  <div class="filter-wrap">
+    <button class="btn ghost" id="filter" aria-haspopup="menu" aria-expanded="false">Filter</button>
+    <div class="dropdown" role="menu" id="filter-menu">
+      <a role="menuitem" href="#/requests">All properties</a>
+      <a role="menuitem" href="#/requests">Maple Court</a>
+      <a role="menuitem" href="#/requests">Harbor Lofts</a>
+      <a role="menuitem" href="#/requests">Elm Street Duplex</a>
+    </div>
+  </div>
+</header>
+<main id="app"></main>
+<div class="bulkbar">
+  <span>Select requests to act on them together</span>
+  <button class="btn ghost">Mark scheduled</button>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

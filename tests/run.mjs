@@ -2,11 +2,12 @@
 // One command for every repo check: npm test (or node tests/run.mjs).
 // Runs the offline self-tests, manifest and skill checks, a style scan, and the seeded-app check
 // (the last one only when Playwright is installed).
-import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,6 +62,37 @@ if (hasPw) {
   const c = JSON.parse(readFileSync(join(cout, 'crawl.json'), 'utf8'));
   const drift = (c.label_drift || []).find(g => g.target.endsWith('#/form'));
   ok('crawler flags label drift', !!drift && drift.labels.includes('Start order') && drift.labels.includes('Order now'), drift ? drift.labels.join(' / ') : 'none found');
+  // 8. Visual checker: every planted kind on the dev fixture, and no false alarms on a busy app
+  const vout = mkdtempSync(join(tmpdir(), 'visual-test-'));
+  run(['skills/shipright-audit/scripts/visual.mjs', 'tests/fixtures/visual-app/index.html', '--out', vout]);
+  const kinds = new Set(JSON.parse(readFileSync(join(vout, 'visual.json'), 'utf8')).findings.map(f => f.kind));
+  const want = ['sentence-pill', 'crowded-pills', 'misaligned', 'big-gap', 'covered-menu', 'sharp-corners', 'count-mismatch'];
+  const lost = want.filter(k => !kinds.has(k));
+  ok('visual checker finds all 7 planted kinds', lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
+  const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
+  run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
+  const noise = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8')).findings.length;
+  ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
+  // 9. Login wall and session: without a session the gated app is a wall; with one the crawl gets in
+  const sess = join(mkdtempSync(join(tmpdir(), 'sess-')), 'session.json');
+  writeFileSync(sess, JSON.stringify({ cookies: [{ name: 'sr_test', value: '1', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' }], origins: [] }));
+  const g1 = mkdtempSync(join(tmpdir(), 'gated-')), g2 = mkdtempSync(join(tmpdir(), 'gated-'));
+  run(['skills/shipright-audit/scripts/crawl.mjs', 'tests/fixtures/gated-app/index.html', '--out', g1]);
+  run(['skills/shipright-audit/scripts/crawl.mjs', 'tests/fixtures/gated-app/index.html', '--session', sess, '--out', g2]);
+  const c1 = JSON.parse(readFileSync(join(g1, 'crawl.json'), 'utf8')), c2 = JSON.parse(readFileSync(join(g2, 'crawl.json'), 'utf8'));
+  ok('crawler reports a login wall', c1.login_wall === true, `wall: ${c1.login_wall}`);
+  ok('crawler gets in with a session and flags empty screens', c2.login_wall === false && c2.screens.length >= 2 && c2.empty_screens >= 1, `${c2.screens.length} screens, ${c2.empty_screens} empty`);
+  // 10. login.mjs saves a session once the page signs in (headless test mode), and fails cleanly on timeout
+  const server = createServer((req, res) => { const f = join(root, 'tests/fixtures/gated-app/index.html'); res.writeHead(200, { 'content-type': 'text/html' }); res.end(readFileSync(f)); });
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}/index.html`;
+  const saved = join(mkdtempSync(join(tmpdir(), 'login-')), 's.json'), never = join(mkdtempSync(join(tmpdir(), 'login-')), 'n.json');
+  const runAsync = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root }); p.on('close', code => res(code)); });
+  const okCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', `${base}?auto`, '--headless', '--timeout', '20', '--out', saved]);
+  const failCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', base, '--headless', '--timeout', '4', '--out', never]);
+  server.close();
+  ok('login.mjs saves a signed-in session', okCode === 0 && existsSync(saved) && JSON.parse(readFileSync(saved, 'utf8')).cookies.some(c => c.name === 'sr_test'), `exit ${okCode}`);
+  ok('login.mjs fails cleanly when nobody signs in', failCode === 1 && !existsSync(never), `exit ${failCode}`);
 } else ok('seeded apps match their answer keys', true, 'SKIPPED: Playwright not installed (npm i -D playwright)');
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.name}${t.note ? `  (${t.note})` : ''}`);

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Walk one core task like a first-time user: click, type and pick by visible words, screenshot every step.
-// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir]
+// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--session session.json]
+// --session: a signed-in session saved by login.mjs.
 // The walk runs twice, at 1280 and at 390 wide, so phone-only breaks show up.
 // Plan file (write one per task):
 // {
@@ -32,10 +33,10 @@ function loadPlaywright() {
 }
 
 const args = process.argv.slice(2);
-const pos = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--out');
+const pos = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
 const [target, planPath] = pos;
 if (!target || !planPath || !existsSync(planPath)) {
-  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir]');
+  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--session session.json]');
   process.exit(2);
 }
 let plan;
@@ -45,6 +46,9 @@ const KNOWN = ['goto', 'click', 'fill', 'select', 'press', 'expect', 'note'];
 const unknown = plan.steps.map((s, i) => [i + 1, s.do]).filter(([, d]) => !KNOWN.includes(d));
 if (unknown.length) { console.error(`walk: unknown step type(s): ${unknown.map(([n, d]) => `step ${n} "${d}"`).join(', ')}. Use ${KNOWN.join(', ')}.`); process.exit(2); }
 
+const si = args.indexOf('--session');
+const session = si >= 0 ? args[si + 1] : null;
+if (session && !existsSync(session)) { console.error(`walk: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
 const oi = args.indexOf('--out');
 const slug = String(plan.task || basename(planPath, '.json')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'task';
 const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audit', 'walks', slug));
@@ -95,7 +99,8 @@ async function findField(page, field) {
 }
 
 async function walkAt(browser, startUrl, width) {
-  const page = await browser.newPage({ viewport: { width, height: width === 390 ? 844 : 800 } });
+  const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, ...(session ? { storageState: session } : {}) });
+  const page = await context.newPage();
   const errors = [];
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
   page.on('pageerror', e => errors.push(e.message.slice(0, 300)));
@@ -141,7 +146,7 @@ async function walkAt(browser, startUrl, width) {
     log.push(entry);
     if (!entry.ok && s.do !== 'expect') { brokeAt = n; break; }
   }
-  await page.close();
+  await context.close();
   return { width, actions, broke_at: brokeAt, finished: brokeAt === null, steps: log, console_errors: [...new Set(errors)] };
 }
 const h1 = page => page.locator('h1').first().innerText({ timeout: 1000 }).then(t => t.replace(/\s+/g, ' ').trim().slice(0, 120)).catch(() => '');

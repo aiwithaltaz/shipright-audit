@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Gated (test fixture)</title></head>
+<body>
+<!-- Dev-only fixture: shows a sign-in form unless the sr_test cookie is set. With ?auto it signs itself in after 1 second. -->
+<main id="app"></main>
+<script>
+  const app = document.getElementById('app');
+  const signedIn = () => document.cookie.includes('sr_test=1');
+  function render() {
+    if (!signedIn()) {
+      app.innerHTML = '<h1>Sign in</h1><label>Email <input type="email"></label><label>Password <input type="password"></label><button>Sign in</button>';
+      if (location.search.includes('auto')) setTimeout(() => { document.cookie = 'sr_test=1; path=/'; history.replaceState(null, '', '/index.html#/home'); render(); }, 1000);
+      return;
+    }
+    const r = location.hash || '#/home';
+    if (r === '#/projects') app.innerHTML = '<h1>Projects</h1><p>No projects yet. Create your first project.</p>';
+    else app.innerHTML = '<h1>Home</h1><nav><a href="#/home">Home</a> <a href="#/projects">Projects</a></nav><p>Welcome back.</p>';
+  }
+  addEventListener('hashchange', render); render();
+</script>
+</body>
+</html>

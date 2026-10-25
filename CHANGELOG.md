@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.3.0-beta.1 (2026-10-25)
+
+From the first audit of a real, signed-in app. The owner listed 9 problems before the run; the audit found 0 of them (all 7 of its own top findings were confirmed real). It was strong on flows and wording and blind to visual craft. This version targets that gap and the access problems behind it.
+
+**Visual craft**
+- **New Pass 3 and `references/visual-craft.md`:** pills hold 1 to 3 words of status, counts match what the page holds, one thing to scan per row, the main action sits where the eye lands, repeated items line up, spacing has no holes, same surfaces share a corner shape, menus sit on top.
+- **New `visual.mjs`:** measures alignment and spacing in repeated cards, sentence and crowded pills, corner drift, menus covered by other layers or off screen, and counts with nothing behind them, with a cropped screenshot per lead. 0 false alarms across 13 screens of the other test apps.
+
+**Access**
+- **New `login.mjs`:** the owner signs in in a real browser window and the session is saved; Claude never sees the password. `crawl.mjs`, `walk.mjs` and `visual.mjs` take `--session`, so the audit works behind a login at 390 and 1280.
+- **The crawler flags a login wall and mostly empty screens.** Step 0 now settles the way in, realistic data, Playwright and what not to click in one message, before any work.
+
+**Safety and honesty**
+- **Guest-in-a-live-app rule:** never publish, post, send, delete, pay, invite, connect or save settings without the owner's yes.
+- **"Left behind" section and reply item,** with an offer to clean up and a reminder to delete the session file.
+- **The gate checks that every cited screenshot exists,** and requires the Left behind section.
+
+**Plugin**
+- **Only `/shipright-audit:audit` shows in the menu;** the skill still runs on its own when you ask for a review.
+- **Removed the next step that pointed to a skill that does not exist yet.**
+
+**Benchmark**
+- **New seeded case s3** (visual craft, 13 pains, 4 Keeps) with 19 independent seed checks (76 in total).
+
 ## 0.2.0-beta.1 (2026-10-23)
 
 Fixes from the first real run of `/shipright-audit:audit`.

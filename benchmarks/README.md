@@ -12,13 +12,14 @@ The pass bars were fixed before any run: see [PREREGISTRATION.md](PREREGISTRATIO
 | `cases.json` | The frozen cases and the exact user message for each |
 | `cases/s1-pawsh-grooming/app` | Seeded app: a dog groomer's booking site. 20 planted pains, 5 planted Keeps |
 | `cases/s2-harvest-volunteers/app` | Seeded app: a food bank's volunteer shift tool. 20 planted pains, 5 planted Keeps |
+| `cases/s3-northwind-maintenance/app` | Seeded app, visual craft: a property manager's maintenance tool. 13 pains (12 planted, 1 found while building), 4 Keeps |
 | `cases/c7-ivc-app/app` | Real app: the IVC registration desk, with the owner's real review (20 pains, 3 Keeps) |
 | `../skills/shipright-audit/` | The skill under test: the same folder users install |
 | `answer-keys/` | One JSON key per case, each with a canary ID. **Never copy these into a run folder.** |
 | `arms/run-prompt.md` | The exact run prompt and the 3 arms |
 | `grader/grader-prompt.md` | The exact grader prompt |
 | `grader/controls/` | A perfect reference review per case and one vague review, mixed into grading as hidden controls |
-| `tools/verify-seeds.mjs` | Proves every planted pain and Keep still exists in s1 and s2 (57 checks) |
+| `tools/verify-seeds.mjs` | Proves every planted pain and Keep still exists in s1, s2 and s3 (76 checks) |
 | `tools/prepare.mjs` | One folder per run, in interleaved launch order, with version pins |
 | `tools/blind.mjs` | Blind grading folders, leak scan, hidden controls, failed runs kept as 0 |
 | `tools/agreement.mjs` | Grader vs grader and human vs grader agreement (Cohen's kappa) |
@@ -38,12 +39,12 @@ Arm b matters most. A skill that only beats "no prompt" is not worth installing.
 
 ```bash
 # 0. Checks that need no API
-node benchmarks/tools/verify-seeds.mjs          # must print "57 of 57 checks pass"
+node benchmarks/tools/verify-seeds.mjs          # must print "76 of 76 checks pass"
 node benchmarks/tools/score.mjs --self-test     # must print "10 of 10 self-test checks pass"
 
-# 1. Make the run folders (default: 3 cases x 3 models x 3 arms x 5 runs = 135)
+# 1. Make the run folders (default: 4 cases x 3 models x 3 arms x 5 runs = 180)
 node benchmarks/tools/prepare.mjs ~/audit-runs v1
-#    Smoke test first: --runs 1 (27 runs). It checks the harness only; never quote its numbers.
+#    Smoke test first: --runs 1 (36 runs). It checks the harness only; never quote its numbers.
 
 # 2. Launch every row of ~/audit-runs/v1/LAUNCH.md in order (rules are at the top of that file).
 
@@ -105,7 +106,7 @@ Requirements: Node 18 or later. `verify-seeds.mjs` also needs Playwright with Ch
 
 ## Known bias (read before quoting numbers)
 
-- **The seeded apps (s1, s2) were written by the same author as the skill**, after the skill. The planted pains are common real-world problems, but they likely lean toward what the skill checks. Expect the skill to look better on s1 and s2 than it really is.
+- **The seeded apps (s1, s2, s3) were written by the same author as the skill**, after the skill. s3 was written after the visual lens, so it leans hardest toward the skill. The planted pains are common real-world problems, but they likely lean toward what the skill checks. Expect the skill to look better on s1, s2 and s3 than it really is.
 - **c7 is the fairest case.** Its key is the owner's real review, written before this skill existed. The report shows a separate "real cases only" comparison.
 - **Hidden cases:** before any public claim, add 2 seeded cases written by someone who has not read the skill (for example a fresh model given only a brief and the cause list). **Keep them out of this public repo.** A drop of more than 10 points in pain recall on hidden cases means the skill is tuned to its own tests.
 - **Public keys:** this repo is public, so s1, s2 and c7 keys could reach future training data. The canary ID makes leaks detectable. Rotate in new cases each release.

@@ -3,9 +3,10 @@
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
 //        node <skill>/scripts/check-stage.mjs --self-test
 // Exit 0 pass, 1 fail (fix and rerun), 2 usage. No dependencies.
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
 
-const SECTIONS = ['Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified'];
+const SECTIONS = ['Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
 const CAUSES = ['layout', 'flow', 'copy', 'missing feature', 'data model', 'rules or prerequisites', 'performance', 'trust', 'access'];
 const SEVERITY_WORDS = { blocker: 4, major: 3, minor: 2, polish: 1 };
 
@@ -26,7 +27,8 @@ function parse(md) {
   return { sections, table, header: (sections._header || []).join('\n') };
 }
 
-export function check(md) {
+// dir: the pain map's folder. When given, every screenshot a pain cites must exist somewhere under it.
+export function check(md, dir = null) {
   const errors = [];
   const { sections, table, header } = parse(md);
   const col = (t, name) => t.head.findIndex(h => h.includes(name));
@@ -90,6 +92,19 @@ export function check(md) {
   if (nowIds.length && !themes.rows.length) errors.push('Themes: group the Now pains into 3 to 5 themes.');
   if (themes.rows.length && (themes.rows.length < 3 || themes.rows.length > 5) && nowIds.length >= 3) errors.push(`Themes: ${themes.rows.length} theme(s). Use 3 to 5.`);
 
+  if (dir) {
+    const walk = d => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [n]; });
+    const onDisk = new Set(walk(dir));
+    for (const r of pains.rows) {
+      for (const shot of (cell(pains, r, 'where').match(/[\w./-]+\.(?:png|jpe?g|webp)\b/gi) || [])) {
+        if (!onDisk.has(basename(shot))) errors.push(`Pains ${r[0]}: screenshot ${shot} does not exist. Cite a file you saved, or move the claim to Not verified.`);
+      }
+    }
+  }
+
+  const lb = sections['Left behind'] || [];
+  if (sections['Left behind'] && !table(lb).rows.length && !/nothing/i.test(lb.join('\n'))) errors.push('Left behind: list what you created or changed in the app or folder, or write "Nothing".');
+
   const nv = (sections['Not verified'] || []).filter(l => /^\s*[-*]\s+\S/.test(l));
   if (!nv.length) errors.push('Not verified: list what you could not check (or write "- Nothing: every check ran").');
   return errors;
@@ -145,6 +160,9 @@ Context used: none given
 
 ## Not verified
 - Screen reader behavior
+
+## Left behind
+- Nothing: no test data was created
 `;
   const bad = good
     .replace('| P02 | No phone nav | Header, screens/home-390.png | Phone users | H3 | Blocker | layout | Found, by 2 of 2 reviewers |', '| P01 | No phone nav | Header | Phone users |  | High | navigation | Guess |')
@@ -152,9 +170,10 @@ Context used: none given
     .replace('Reviewers: 1', 'Reviewer count: 1')
     .replace('- Screen reader behavior', '')
     .replace('| P01 | Rule shown late |', '| P01 | Rule shown late; no Back button. Users lose work. Cancel wipes it. |')
-    .replace('| 404 | Lost users | |', '');
+    .replace('| 404 | Lost users | |', '')
+    .replace('- Nothing: no test data was created', '');
   const g = check(good), b = check(bad);
-  const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows'];
+  const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);
@@ -165,7 +184,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const arg = process.argv[2];
   if (arg === '--self-test') selfTest();
   if (!arg || !existsSync(arg)) { console.error('usage: node <skill>/scripts/check-stage.mjs <pain-map.md> | --self-test'); process.exit(2); }
-  const errors = check(readFileSync(arg, 'utf8'));
+  const errors = check(readFileSync(arg, 'utf8'), dirname(arg));
   if (!errors.length) { console.log('PASS: the pain map meets the gate.'); process.exit(0); }
   console.log(`FAIL: ${errors.length} problem(s). Fix them and run this again.\n`);
   errors.forEach(e => console.log(`- ${e}`));
