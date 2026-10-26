@@ -35,7 +35,7 @@ Audit progress:
 ## Rules that never bend
 
 - **Read-only code.** Do not edit app files, add packages to the app's project, deploy or push. Write only under `docs/shipright/audit/`.
-- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account or saves settings, unless the owner said yes to that exact action. Opening menus, reading pages and generating a draft are fine. Keep a list of everything you create or change.
+- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus and reading pages are fine. Keep a list of everything you create or change.
 - **Evidence for every pain.** A pain needs a screen and a screenshot that exists on disk. No evidence, no pain.
 - **Only claim what you finished.** Never say you checked something you did not. If a width, a state or a flow was not seen, it goes in Not verified, never in the findings.
 - **No invented facts.** No made-up user quotes, complaints, metrics or analytics.
