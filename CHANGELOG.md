@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3-beta.1 (2026-10-26)
+
+- **Fixed the reloading sign-in window.** While waiting for the owner, `login.mjs` read the browser's saved storage every 1.5 seconds. For every site the window had visited, Google's sign-in included, Playwright opens a hidden tab to read it, so the window kept flashing and "Sign in with Google" broke. It now reads storage only once the page looks signed in.
+
 ## 0.4.2-beta.1 (2026-10-26)
 
 From the SocialGhost signed-in audit, where "Sign in with Google" kept reloading and nobody could sign in.

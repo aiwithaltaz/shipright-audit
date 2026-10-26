@@ -79,10 +79,12 @@ context.on('close', () => { closed = true; });
 const started = Date.now();
 while (Date.now() - started < timeoutMs) {
   if (closed) break;
-  try { last = await context.storageState(); } catch { break; }
   const inNow = await looksSignedIn().catch(() => false);
   streak = inNow ? streak + 1 : 0;
-  if (inNow) wasIn = true;
+  // Read the cookies only once the page looks signed in. Reading storage opens a hidden tab for every site
+  // the window has visited (Google's sign-in included); doing that every few seconds kept reloading and
+  // broke "Sign in with Google" pop-ups.
+  if (inNow) { try { last = await context.storageState(); wasIn = true; } catch { break; } }
   if (streak >= 2) { signedIn = true; break; }
   await new Promise(r => setTimeout(r, 1500));
 }
