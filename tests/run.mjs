@@ -110,6 +110,16 @@ if (hasPw) {
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);
+// 13. version.mjs --fetch refreshes a stale saved copy of the marketplace, so the Update button works
+{
+  const home = mkdtempSync(join(tmpdir(), 'home-')), copy = join(home, '.claude', 'plugins', 'marketplaces', 'shipright-audit');
+  const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  const head = g(['rev-parse', 'HEAD'], root).stdout.trim();
+  if (head && g(['clone', '-q', root, copy]).status === 0 && g(['reset', '-q', '--hard', 'HEAD~1'], copy).status === 0) {
+    const f = spawnSync(process.execPath, ['skills/shipright-audit/scripts/version.mjs', '--fetch'], { cwd: root, encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: '' } });
+    ok('version.mjs --fetch refreshes a stale saved copy', f.status === 0 && g(['rev-parse', 'HEAD'], copy).stdout.trim() === head, f.stdout.trim().slice(0, 60));
+  } else ok('version.mjs --fetch refreshes a stale saved copy', true, 'SKIPPED: no git history');
+}
 r = run(['skills/shipright-audit/scripts/setup.mjs', '--check']);
 ok('setup.mjs reports Playwright', r.status === (hasPw ? 0 : 1), r.stdout.trim());
 

@@ -48,7 +48,7 @@ Audit progress:
 The owner asked for an audit, so start it. Do not open with a list of questions: crawl first, and ask only when something blocks you. Each question below is asked only when its trigger happens, in one short message.
 
 1. **Say one line and start.** "Auditing <url>. Read-only: I won't publish, send, delete, generate or save anything." Then go on.
-2. **Version.** Execute `node <skill>/scripts/version.mjs`. If it says a newer version is out, put its line at the end of the reply. Never stop for it.
+2. **Version.** Execute `node <skill>/scripts/version.mjs`. Never stop for it. If it says a newer version is out, end the reply with the update note (below).
 3. **Tools.** Execute `node <skill>/scripts/setup.mjs`. It installs Playwright in a ShipRight tools folder in the user's home, never in the app, and does nothing if Playwright is already there. Do not ask first. If it fails, audit by hand and say what that cost.
 4. **Check the door.** Run the crawl (Step 1). Then:
    - **Login wall:** execute `node <skill>/scripts/login.mjs <url>` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there and I'll carry on." The session goes to `docs/shipright/audit/.session.json`. Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. Then crawl again with `--session`. If the window closes without a session, say so and offer to open it again.
@@ -185,7 +185,7 @@ Keep it short. In this order:
 7. **Not verified:** what you could not check.
 8. **Left behind:** everything you created or changed in the app (test items, drafts, notifications) and in the folder (packages, the session file). Offer to remove what you can. Always remind the owner to delete `.session.json`.
 9. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
-10. **Update note:** only if `version.mjs` said a newer version is out, its line.
+10. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
 
 ## Never
 

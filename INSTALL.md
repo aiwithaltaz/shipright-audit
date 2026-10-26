@@ -22,9 +22,16 @@ Send these as two separate prompts:
 /plugin install shipright-audit@shipright-audit
 ```
 
-Then turn on updates, so new versions reach you on their own: type `/plugin`, open **Marketplaces**, pick **shipright-audit** and choose **Enable auto-update**. Claude Code leaves this off for marketplaces outside Anthropic's own.
+### Updating
 
-**Update by hand** (if you skipped auto-update, or the Update button is greyed out): `/plugin`, **Marketplaces**, **shipright-audit**, update the marketplace, then restart. If it still shows the old version, remove the marketplace and add it again with the two commands above. The audit also tells you at the end of its reply when a newer version is out.
+Claude Code does not auto-update marketplaces outside Anthropic's own. The easy way: when a newer version is out, the audit says so at the end of its reply. Say "update it" and it fetches the new version for you; then restart, type `/plugin`, open **Installed**, pick **Shipright audit**, click **Update** and confirm.
+
+**Claude Code in a terminal:** type `/plugin`, open **Marketplaces**, pick **shipright-audit** and update it. You can also choose **Enable auto-update** there, so new versions arrive on their own.
+
+**Claude Code desktop app, by hand** (no Marketplaces tab, Update button greyed out):
+1. Refresh the saved copy. In a Claude Code chat, paste: "Run git pull in %USERPROFILE%\.claude\plugins\marketplaces\shipright-audit (on a Mac: ~/.claude/plugins/marketplaces/shipright-audit) and tell me the version in .claude-plugin/plugin.json there."
+2. Restart the app. The Update button only appears after a restart.
+3. Type `/plugin`, open **Installed**, pick **Shipright audit**, click **Update** and confirm. If it is still greyed out, use **...** then **Remove**, and install it again.
 
 Use it:
 

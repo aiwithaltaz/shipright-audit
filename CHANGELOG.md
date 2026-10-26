@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1-beta.1 (2026-10-26)
+
+- **Updates without GitHub.** When a newer version is out, the audit ends its reply with "Say 'update it' and I'll fetch it." On yes, `version.mjs --fetch` refreshes Claude Code's saved copy of the marketplace, which the desktop app never refreshes on its own. Then: restart, `/plugin`, Installed, Shipright audit, Update.
+- **Install guide:** separate update steps for the terminal and the desktop app. The auto-update switch only exists in the terminal version.
+
 ## 0.4.0-beta.1 (2026-10-26)
 
 From the Content Desk rerun on 0.3.2: the owner's real account, signed in through Edge. It found 5 and a half of the owner's 11 items (0.2 found none) and 4 real problems the owner had not listed, including a Blocker: failed automations shown as healthy. Reading its working files showed why it missed the rest.
@@ -33,7 +38,7 @@ From the Content Desk rerun on 0.3.2: the owner's real account, signed in throug
 **Browsers and updates**
 - **WebKit fallback** after Chromium, Edge and Chrome, so a Mac without Edge or Chrome still works. Not yet tested on a Mac.
 - **New `version.mjs`:** the reply says when a newer version is out.
-- **Install guide:** turn on auto-update, which Claude Code leaves off for marketplaces outside Anthropic's own, and how to update when the Update button is greyed out.
+- **Install guide:** how to turn on auto-update in the terminal version.
 
 ## 0.3.2-beta.1 (2026-10-25)
 

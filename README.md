@@ -17,7 +17,7 @@ Built for apps people already shipped with Cursor, Lovable, Claude Code, Replit 
 /plugin install shipright-audit@shipright-audit
 ```
 
-Then turn on auto-update: `/plugin` → **Marketplaces** → **shipright-audit** → **Enable auto-update**. It is off by default for marketplaces outside Anthropic's own, so without it you stay on the version you installed.
+**Stay up to date.** Claude Code does not auto-update marketplaces outside Anthropic's own, so you stay on the version you installed until you update. When a newer version is out, the audit says so at the end of its reply and offers to fetch it: say "update it", restart, and click Update. Details: [INSTALL.md](INSTALL.md#updating).
 
 Then audit an app:
 
