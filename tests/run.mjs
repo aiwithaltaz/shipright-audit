@@ -100,8 +100,16 @@ if (hasPw) {
   mini.close();
   const hw = JSON.parse(readFileSync(join(hdir, 'out', 'walk.json'), 'utf8')).widths;
   ok('walker holds back typing in a live app', hcode === 0 && hw['1280'].held_at === 1 && hw['1280'].actions === 0, `exit ${hcode}, held at ${hw['1280'].held_at}`);
-  const okCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', `${base}?auto`, '--headless', '--timeout', '20', '--out', saved]);
-  const failCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', base, '--headless', '--timeout', '4', '--out', never]);
+  const prof = () => mkdtempSync(join(tmpdir(), 'profile-'));
+  const okCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', `${base}?auto`, '--headless', '--timeout', '20', '--out', saved, '--profile', prof()]);
+  const failCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', base, '--headless', '--timeout', '4', '--out', never, '--profile', prof()]);
+  // Google and other pop-up sign-ins refuse windows that announce automation: this page signs in only when navigator.webdriver is false.
+  const stealth = createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<h1>App</h1><script>if (!navigator.webdriver) document.cookie = "sr_human=1; path=/"; else document.body.insertAdjacentHTML("beforeend", "<form><input type=password></form>");</script>'); });
+  await new Promise(r => stealth.listen(0, '127.0.0.1', r));
+  const human = join(mkdtempSync(join(tmpdir(), 'login-')), 'h.json');
+  const humanCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', `http://127.0.0.1:${stealth.address().port}/`, '--headless', '--timeout', '15', '--out', human, '--profile', prof()]);
+  stealth.close();
+  ok('sign-in window does not announce automation', humanCode === 0 && existsSync(human) && JSON.parse(readFileSync(human, 'utf8')).cookies.some(c => c.name === 'sr_human'), `exit ${humanCode}`);
   server.close();
   ok('login.mjs saves a signed-in session', okCode === 0 && existsSync(saved) && JSON.parse(readFileSync(saved, 'utf8')).cookies.some(c => c.name === 'sr_test'), `exit ${okCode}`);
   ok('login.mjs fails cleanly when nobody signs in', failCode === 1 && !existsSync(never), `exit ${failCode}`);
