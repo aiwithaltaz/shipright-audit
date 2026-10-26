@@ -25,6 +25,13 @@ Context used: <users, business goal, analytics, owner complaints: or "none given
 | ID | What happens | Where (screens + screenshot) | Who | Heuristic or lens | Severity (1-4) | Cause | Source |
 |---|---|---|---|---|---|---|---|
 
+## Visual leads
+
+One row per lead in `visual/visual.md`. Decision: the pain ID it became, or "Rejected: <what you saw on the crop>". Delete this section only if visual.mjs did not run.
+
+| Lead | Check | Decision |
+|---|---|---|
+
 ## Missing
 
 | Page or job | Why it matters | Pain ID (if it blocks a task) |

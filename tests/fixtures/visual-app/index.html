@@ -29,6 +29,14 @@
   .card.odd .date { padding-left: 18px; }
   .list .card p { margin-bottom: 84px; }
   .list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 32px; }
+  .plans { display: grid; gap: 16px; margin-top: 32px; }
+  .plan { background: #fff; border: 1px solid var(--line); border-radius: var(--r); padding: 20px; }
+  .plan h3 { margin: 8px 0; font-size: 20px; }
+  .plan .fields { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 16px 0 28px; }
+  .plan .k { text-transform: uppercase; font-size: 11px; letter-spacing: .08em; color: var(--muted); }
+  .plan .v { font-size: 14px; margin-top: 4px; }
+  .ghost { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 14px; }
+  .loading { width: 32px; height: 32px; border-radius: 50%; border: 3px solid #ddd; border-top-color: #333; }
   .composer { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #fff; border-top: 1px solid var(--line); z-index: 50; padding: 16px 24px; }
   .composer textarea { width: 100%; height: 80px; border: 1px solid var(--line); border-radius: var(--r); padding: 10px; font: inherit; }
 </style>
@@ -47,13 +55,18 @@
 <script>
   const app = document.getElementById('app');
   const card = (t, d, odd, pills) => `<article class="card${odd ? ' odd' : ''}"><h3>${t}</h3>${pills ? `<div class="pills">${pills.map(p => `<span class="pill">${p}</span>`).join('')}</div>` : ''}<p>A quick weeknight dish with pantry staples.</p><div class="meta"><span class="date">${d}</span><button class="btn">Open</button></div></article>`;
+  const field = (k, v) => `<div><div class="k">${k}</div><div class="v">${v}</div></div>`;
+  const plan = (t, status) => `<article class="plan"><span class="pill">${status}</span><h3>${t}</h3><p>Plans a week of dinners from what is in the pantry and what is on sale nearby.</p><div class="fields">${field('Schedule', 'Mon and Thu')}${field('Window', '7 days')}${field('Diet', 'Any')}${field('Servings', '4')}${field('Next run', 'Oct 27')}${field('Last result', 'Done')}${field('Budget', '$80')}${field('Store', 'Nearby')}</div><button class="ghost">View details</button></article>`;
+  let ready = false;
   function render() {
     if (location.hash === '#/saved') { app.innerHTML = '<h1>Saved</h1><p>No saved recipes yet. Save one from Recipes.</p>'; return; }
+    if (!ready) { app.innerHTML = '<h1>Recipes</h1><div class="loading" aria-busy="true"></div><p>Nothing here yet.</p>'; setTimeout(() => { ready = true; render(); }, 1200); return; }
     app.innerHTML = '<h1>Recipes</h1><section class="grid">'
       + card('Lemon pasta', 'Oct 12, 2026', false, ['Quick', 'Vegetarian'])
       + card('Tomato soup', 'Oct 10, 2026', true, ['This recipe was generated from your saved notes last week'])
       + card('Fried rice', 'Oct 8, 2026', false, ['Quick', 'Rice', 'Spicy', 'Leftovers', 'Wok', 'Dinner'])
-      + '</section><section class="list">' + card('Bean chili', 'Sep 30, 2026') + card('Pancakes', 'Sep 28, 2026') + '</section>';
+      + '</section><section class="list">' + card('Bean chili', 'Sep 30, 2026') + card('Pancakes', 'Sep 28, 2026') + '</section>'
+      + '<h2>Meal plans</h2><section class="plans">' + plan('Weeknight dinners', 'Active') + plan('Batch cooking Sundays', 'Paused') + '</section>';
   }
   const acct = document.getElementById('acct'), menu = document.getElementById('menu');
   acct.addEventListener('click', () => { const open = menu.classList.toggle('open'); acct.setAttribute('aria-expanded', String(open)); });

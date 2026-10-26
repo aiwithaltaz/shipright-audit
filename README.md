@@ -4,7 +4,7 @@
 
 Built for apps people already shipped with Cursor, Lovable, Claude Code, Replit and friends: they work, but they feel clunky, and nobody can say exactly why.
 
-> **Status: v0.3 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
+> **Status: v0.4 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
 
 ## Install
 
@@ -17,6 +17,8 @@ Built for apps people already shipped with Cursor, Lovable, Claude Code, Replit 
 /plugin install shipright-audit@shipright-audit
 ```
 
+Then turn on auto-update: `/plugin` → **Marketplaces** → **shipright-audit** → **Enable auto-update**. It is off by default for marketplaces outside Anthropic's own, so without it you stay on the version you installed.
+
 Then audit an app:
 
 ```
@@ -25,7 +27,9 @@ Then audit an app:
 
 or just ask: *"Review my app and tell me what to fix first."*
 
-**App behind a login?** The audit asks first. You sign in yourself in a real browser window (`login.mjs`) and it reuses that session; it never sees your password. Use an account with realistic data: empty screens hide the problems you care about.
+**No questionnaire.** It starts right away and asks only when something blocks it.
+
+**App behind a login?** A browser window opens on your screen and you sign in there (`login.mjs`). The audit reuses that session and never sees your password. Never type a password into a chat with any AI: chats are kept. Use an account with realistic data: empty screens hide the problems you care about.
 
 Cursor, Codex, Antigravity, Copilot, Windsurf and others: see [INSTALL.md](INSTALL.md).
 
@@ -50,22 +54,22 @@ Then the reply, in this order:
 
 It follows the method expert designers use, one rung at a time:
 
-0. **Way in first:** sign-in, realistic data, tools and what it will not click, settled in one message
+0. **Start, don't ask:** installs its browser tools outside your app, crawls, and only opens a sign-in window or asks about data when it has to
 1. **Reach every screen** at phone and desktop width (`crawl.mjs`), and flag a login wall or empty screens
 2. **Name the core tasks** as user goals
 3. **Pass 1: walk each task** as a first-time user, screenshotting every step at both widths (`walk.mjs`)
 4. **Pass 2: check each screen** against the 10 usability heuristics, layout and hierarchy, work-screen rules and WCAG 2.2 AA basics, with independent reviewers when your tool supports subagents
-5. **Pass 3: visual craft:** pills, counts, density, alignment, spacing, corner shape and layering (`visual.mjs` measures most of them)
+5. **Pass 3: visual craft:** pills, counts, too many labels, a buried main action, alignment, spacing, corner shape and layering (`visual.mjs` measures them after each page finishes loading). Every lead it measures must end up as a pain or be rejected with a reason
 6. **Name what works** (at least 3 Keeps)
 7. **Write each pain** with evidence, the heuristic it breaks, severity and cause
 8. **Find what is missing** (empty states, errors, 404, recovery paths)
 9. **Rank** by impact, confidence and effort, then group into themes
-10. **Gate:** `check-stage.mjs` refuses a pain map with missing evidence, screenshots that do not exist, causes or tests
+10. **Re-check and gate:** it rereads the screenshot behind every Blocker and Major, then `check-stage.mjs` refuses a pain map with missing evidence, screenshots that do not exist, undecided visual leads, or claims resting on a mid-load screenshot
 
 ## What it will not do
 
 - Edit, install into, deploy or push your app
-- Publish, post, send, delete, pay or connect anything in your live app without asking. It tells you everything it created and offers to clean up
+- Publish, post, send, delete, pay, generate, save or connect anything in your live app without asking, or type into forms that may autosave. It tells you everything it created and offers to clean up
 - Invent user quotes, complaints or numbers
 - Replace real users: expert findings are predictions, so it tells you which 3 to test
 - Replace a full accessibility audit: it runs the quick checks and says what it could not verify
@@ -80,7 +84,7 @@ Coming soon. The benchmark in [benchmarks/](benchmarks/) compares 3 arms on 4 ap
 
 ## Requirements
 
-Node 18 or later and Playwright (`npm i -D playwright`). The scripts use Playwright's Chromium, or fall back to your installed Microsoft Edge or Google Chrome if it will not start. Without Playwright, the audit still runs by hand and says what it could not check.
+Node 18 or later. The audit installs Playwright itself, in `~/.shipright/tools`, never in your app. The scripts use Playwright's Chromium, then your installed Microsoft Edge or Google Chrome, then Playwright's WebKit. Without Playwright, the audit still runs by hand and says what it could not check.
 
 ## Part of ShipRight
 

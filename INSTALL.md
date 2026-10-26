@@ -2,7 +2,7 @@
 
 | Tool | How | Tested |
 |---|---|---|
-| Claude Code | Plugin (below) | Plugin passes `claude plugin validate`. Live install: test after publishing |
+| Claude Code | Plugin (below) | Tested on Windows in the desktop app, with Edge as the browser |
 | Skills CLI (many agents) | `npx skills add aiwithaltaz/shipright-audit` | Not yet. Please report |
 | Codex | Plugin (below) | Not yet. Please report |
 | Antigravity CLI | `agy plugin install https://github.com/aiwithaltaz/shipright-audit` | Not yet. Please report |
@@ -21,6 +21,10 @@ Send these as two separate prompts:
 ```
 /plugin install shipright-audit@shipright-audit
 ```
+
+Then turn on updates, so new versions reach you on their own: type `/plugin`, open **Marketplaces**, pick **shipright-audit** and choose **Enable auto-update**. Claude Code leaves this off for marketplaces outside Anthropic's own.
+
+**Update by hand** (if you skipped auto-update, or the Update button is greyed out): `/plugin`, **Marketplaces**, **shipright-audit**, update the marketplace, then restart. If it still shows the old version, remove the marketplace and add it again with the two commands above. The audit also tells you at the end of its reply when a newer version is out.
 
 Use it:
 
@@ -54,14 +58,16 @@ Copy `.cursor/rules/shipright-audit.mdc` and `AGENTS.md` into your project. The 
 
 Copy `AGENTS.md` into your project root. It only applies when you ask for an app review.
 
-## Optional: automatic screen crawl
+## Browser tools (automatic)
+
+The audit installs Playwright itself on first use, in a ShipRight tools folder in your home folder (`~/.shipright/tools`), never in your app. It uses Playwright's Chromium, or your installed Microsoft Edge or Google Chrome, or (on a Mac) Playwright's WebKit. To set it up ahead of time:
 
 ```bash
-npm i -D playwright && npx playwright install chromium
+node skills/shipright-audit/scripts/setup.mjs
 ```
 
-Without it, the audit visits screens by hand and marks interactive checks as Not verified.
+Without Playwright, the audit visits screens by hand and marks interactive checks as Not verified.
 
 ## Uninstall
 
-Claude Code: `/plugin uninstall shipright-audit@shipright-audit`. Elsewhere, delete the copied files.
+Claude Code: `/plugin uninstall shipright-audit@shipright-audit`. Elsewhere, delete the copied files. To remove the browser tools too, delete `~/.shipright`.

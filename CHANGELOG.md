@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.0-beta.1 (2026-10-26)
+
+From the Content Desk rerun on 0.3.2: the owner's real account, signed in through Edge. It found 5 and a half of the owner's 11 items (0.2 found none) and 4 real problems the owner had not listed, including a Blocker: failed automations shown as healthy. Reading its working files showed why it missed the rest.
+
+**It measured them, then dropped them**
+- **Visual leads ledger.** `visual.mjs` had measured the misaligned Library dates, the big gap in the cards and the square-cornered menu, and the audit dropped all three without a word. Now every lead must end up in the pain map as a pain or as "Rejected:" with a reason, and the gate refuses gaps.
+- **Leads are grouped:** the same problem on several pages is one lead (30 became 13 on Content Desk).
+
+**Pages read before they loaded**
+- **Every script waits for the page to settle:** no spinner, and the text and numbers unchanged on two reads in a row. Content Desk shows "0" and "Nothing needs review" for a second on every load, and the crawl had read that state.
+- **The crawl marks screens that never settled,** and the gate refuses a pain that rests on one of their screenshots unless loading is the pain.
+- **Evidence re-check:** before the gate, the audit rereads the screenshot behind every Blocker and Major. One cited screenshot said "0 in review" while its row said 3.
+
+**The gate never ran on Windows**
+- `check-stage.mjs` compared its own path in a way that only works on Mac and Linux, so on Windows it exited without checking anything. Fixed, and the reply now says "Gate: passed" or what failed. The same fix is in `score.mjs`.
+
+**New visual checks**
+- **Main action buried:** the only worded action at the bottom of a tall card, after 10 or more pieces of text ("View details" on Content Desk).
+- **Too many labels:** more than 7 small labels and pills on one card.
+- Still 0 false alarms on the 13 screens of the other test apps.
+
+**No questionnaire**
+- **Step 0 now starts instead of asking 5 questions.** It says one line, crawls, opens the sign-in window itself on a login wall, and asks about data only when the screens come back empty.
+- **Never asks for a password in chat.** Chats are kept; the sign-in window is the safe way.
+- **New `setup.mjs`:** installs Playwright in `~/.shipright/tools`, never in the app.
+
+**Safety**
+- **Generating content needs the owner's yes**, like publishing: it can spend credits and adds records.
+- **No typing into composers or forms** on a live app (they may autosave). `walk.mjs` holds back those steps, and clicks on risky words, unless the step says the owner agreed.
+
+**Browsers and updates**
+- **WebKit fallback** after Chromium, Edge and Chrome, so a Mac without Edge or Chrome still works. Not yet tested on a Mac.
+- **New `version.mjs`:** the reply says when a newer version is out.
+- **Install guide:** turn on auto-update, which Claude Code leaves off for marketplaces outside Anthropic's own, and how to update when the Update button is greyed out.
+
 ## 0.3.2-beta.1 (2026-10-25)
 
 From the Content Desk rerun on a Windows preview build, where Playwright's Chromium would not start ("side-by-side configuration is incorrect").

@@ -17,21 +17,18 @@
 //   ]
 // }
 // A failed click, fill, select or goto stops that width's walk and records "broke at step N".
+// Live apps (http/https): the walk will not click risky words (publish, send, delete, generate, save...)
+// and will not type into fields other than search boxes, unless that step has "owner_said_yes": true.
+// A step it refuses is logged as "held back" and the walk stops there without counting it as a break.
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
-import { launch } from './browser.mjs';
+import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 
 const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  for (const name of ['playwright', 'playwright-core']) { try { return require(name); } catch {} }
-  try { return createRequire(join(process.cwd(), 'package.json'))('playwright'); } catch {}
-  console.error('walk: Playwright not found. Install it with: npm i -D playwright && npx playwright install chromium');
-  process.exit(2);
-}
 
 const args = process.argv.slice(2);
 const pos = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
@@ -105,15 +102,23 @@ async function walkAt(browser, startUrl, width) {
   const errors = [];
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
   page.on('pageerror', e => errors.push(e.message.slice(0, 300)));
-  await page.goto(startUrl, { waitUntil: 'networkidle', timeout: 20000 });
-  await page.waitForTimeout(250);
+  await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await settle(page);
   const log = [];
-  let actions = 0, brokeAt = null;
+  let actions = 0, brokeAt = null, heldAt = null;
   const shot = async n => { const file = `${width}-${String(n).padStart(2, '0')}.png`; await page.screenshot({ path: join(outDir, file) }); return file; };
   log.push({ n: 0, do: 'start', ok: true, url: page.url(), h1: await h1(page), shot: await shot(0) });
   for (let i = 0; i < plan.steps.length; i++) {
     const s = plan.steps[i], n = i + 1;
     const entry = { n, do: s.do, target: s.text || s.field || s.to || s.key || '', ok: true };
+    const held = remote && !s.owner_said_yes && (
+      (s.do === 'click' && DANGER.test(s.text || '')) ||
+      ((s.do === 'fill' || s.do === 'select') && !/search|find|filter/i.test(s.field || '')));
+    if (held) {
+      entry.ok = false; entry.held = true;
+      entry.error = s.do === 'click' ? `held back: "${s.text}" could change the live app. Needs the owner's yes.` : `held back: typing into "${s.field}" in a live app may autosave. Needs the owner's yes.`;
+      log.push(entry); heldAt = n; break;
+    }
     try {
       if (s.do === 'goto') {
         const url = /^https?:/.test(s.to) ? s.to : new URL(s.to, startUrl).href;
@@ -141,18 +146,18 @@ async function walkAt(browser, startUrl, width) {
     } catch (e) {
       entry.ok = false; entry.error = String(e.message || e).split('\n')[0].slice(0, 200);
     }
-    await page.waitForTimeout(200);
+    if (s.do !== 'note') await settle(page, { timeout: 6000 });
     entry.url = page.url(); entry.h1 = await h1(page);
     if (s.do !== 'note') entry.shot = await shot(n);
     log.push(entry);
     if (!entry.ok && s.do !== 'expect') { brokeAt = n; break; }
   }
   await context.close();
-  return { width, actions, broke_at: brokeAt, finished: brokeAt === null, steps: log, console_errors: [...new Set(errors)] };
+  return { width, actions, broke_at: brokeAt, held_at: heldAt, finished: brokeAt === null && heldAt === null, steps: log, console_errors: [...new Set(errors)] };
 }
 const h1 = page => page.locator('h1').first().innerText({ timeout: 1000 }).then(t => t.replace(/\s+/g, ' ').trim().slice(0, 120)).catch(() => '');
 
-const { chromium } = loadPlaywright();
+const { chromium } = loadPlaywright('walk');
 const browser = await launch(chromium, {}, 'walk');
 let server, startUrl = target;
 if (!remote) {
@@ -167,8 +172,9 @@ finally { await browser.close(); if (server) server.close(); }
 const report = { task: plan.task || slug, target, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
 writeFileSync(join(outDir, 'walk.json'), JSON.stringify(report, null, 2) + '\n');
 const [d, p] = runs;
-const cell = (r, n) => { const e = r.steps.find(x => x.n === n); if (!e) return 'not reached'; return `${e.ok ? 'ok' : 'FAIL: ' + e.error}${e.shot ? ` (${e.shot})` : ''}`; };
-const md = [`# Walk: ${report.task}`, '', `Desktop: ${d.finished ? 'finished' : `broke at step ${d.broke_at}`}, ${d.actions} actions · Phone: ${p.finished ? 'finished' : `broke at step ${p.broke_at}`}, ${p.actions} actions`, '',
+const state = r => r.broke_at ? `broke at step ${r.broke_at}` : r.held_at ? `held back at step ${r.held_at} (needs the owner's yes)` : 'finished';
+const cell = (r, n) => { const e = r.steps.find(x => x.n === n); if (!e) return 'not reached'; return `${e.ok ? 'ok' : (e.held ? 'HELD: ' : 'FAIL: ') + e.error}${e.shot ? ` (${e.shot})` : ''}`; };
+const md = [`# Walk: ${report.task}`, '', `Desktop: ${state(d)}, ${d.actions} actions · Phone: ${state(p)}, ${p.actions} actions`, '',
   '| Step | Action | 1280 | 390 |', '| --- | --- | --- | --- |',
   ...plan.steps.map((s, i) => `| ${i + 1} | ${s.do} ${(s.text || s.field || s.to || s.key || '').replace(/\|/g, '/')} | ${cell(d, i + 1)} | ${cell(p, i + 1)} |`)];
 const notes = plan.steps.filter(s => s.do === 'note').map(s => `- ${s.text}`);
@@ -176,5 +182,5 @@ if (notes.length) md.push('', '## Notes', '', ...notes);
 const errs = [...new Set([...d.console_errors, ...p.console_errors])];
 if (errs.length) md.push('', '## Console errors', '', ...errs.map(e => `- ${e}`));
 writeFileSync(join(outDir, 'walk.md'), md.join('\n') + '\n');
-console.log(`walk: "${report.task}" · 1280 ${d.finished ? 'finished' : 'broke at step ' + d.broke_at} (${d.actions} actions) · 390 ${p.finished ? 'finished' : 'broke at step ' + p.broke_at} (${p.actions} actions) · ${outDir}`);
-process.exit(d.finished && p.finished ? 0 : 1);
+console.log(`walk: "${report.task}" · 1280 ${state(d)} (${d.actions} actions) · 390 ${state(p)} (${p.actions} actions) · ${outDir}`);
+process.exit(d.broke_at || p.broke_at ? 1 : 0);

@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 // Check a pain map against the shipright-audit gate. Every failure names the row and the field to fix.
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
+// When the audit folder holds visual/visual.json, every visual lead must be listed in "## Visual leads"
+// as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
+// a pain may not cite that screen's screenshot.
 //        node <skill>/scripts/check-stage.mjs --self-test
 // Exit 0 pass, 1 fail (fix and rerun), 2 usage. No dependencies.
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { readFileSync, existsSync, readdirSync, statSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, basename, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const SECTIONS = ['Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
 const CAUSES = ['layout', 'flow', 'copy', 'missing feature', 'data model', 'rules or prerequisites', 'performance', 'trust', 'access'];
@@ -102,6 +107,40 @@ export function check(md, dir = null) {
     }
   }
 
+  if (dir) {
+    const find = (d, name, depth = 0) => { if (depth > 3 || !existsSync(d)) return null; for (const n of readdirSync(d)) { const p = join(d, n); if (n === name) return p; if (statSync(p).isDirectory()) { const f = find(p, name, depth + 1); if (f) return f; } } return null; };
+    // Visual leads ledger: no lead the script measured may vanish without a decision.
+    const vj = find(dir, 'visual.json');
+    if (vj) {
+      let leads = [];
+      try { const v = JSON.parse(readFileSync(vj, 'utf8')); leads = (v.leads || v.findings || []).map(l => l.id); } catch {}
+      if (leads.length) {
+        const ledger = table(sections['Visual leads'] || []);
+        if (!sections['Visual leads']) errors.push(`Missing section "## Visual leads". visual.mjs found ${leads.length} lead(s); list each as a pain (P##) or Rejected with the reason.`);
+        else {
+          const rows = new Map(ledger.rows.map(r => [r[0], r]));
+          const missingLeads = leads.filter(id => !rows.has(id));
+          if (missingLeads.length) errors.push(`Visual leads: ${missingLeads.join(', ')} not decided. Add a row for each: the pain ID it became, or "Rejected: <what you saw on the crop>".`);
+          for (const [id, r] of rows) {
+            const decision = cell(ledger, r, 'decision') || r[r.length - 1] || '';
+            const pain = decision.match(/\bP\d{2,}\b/);
+            if (pain && !ids.has(pain[0])) errors.push(`Visual leads ${id}: ${pain[0]} is not in Pains.`);
+            if (!pain && !(/^rejected\b/i.test(decision) && decision.replace(/^rejected\W*/i, '').split(/\s+/).length >= 3)) errors.push(`Visual leads ${id}: decision must be a pain ID, or "Rejected:" with a reason of 3 words or more.`);
+          }
+        }
+      }
+    }
+    // Mid-load screenshots: a screen the crawl saw still changing cannot carry a claim on its own.
+    const cj = find(dir, 'crawl.json');
+    if (cj) {
+      let unsettled = [];
+      try { unsettled = JSON.parse(readFileSync(cj, 'utf8')).unsettled || []; } catch {}
+      for (const r of pains.rows) for (const sid of unsettled) {
+        if (new RegExp(`\\b${sid}-(desktop|phone)\\.png`).test(cell(pains, r, 'where'))) errors.push(`Pains ${r[0]}: ${sid} was still loading when the crawl saved it. Cite a screenshot taken after the page settled, unless the loading state is the pain.`);
+      }
+    }
+  }
+
   const lb = sections['Left behind'] || [];
   if (sections['Left behind'] && !table(lb).rows.length && !/nothing/i.test(lb.join('\n'))) errors.push('Left behind: list what you created or changed in the app or folder, or write "Nothing".');
 
@@ -172,15 +211,30 @@ Context used: none given
     .replace('| P01 | Rule shown late |', '| P01 | Rule shown late; no Back button. Users lose work. Cancel wipes it. |')
     .replace('| 404 | Lost users | |', '')
     .replace('- Nothing: no test data was created', '');
+  // Folder checks: an undecided visual lead, a lead pointing at a missing pain, a vague rejection,
+  // and a pain that cites a screenshot the crawl saved mid-load.
+  const d = mkdtempSync(join(tmpdir(), 'gate-'));
+  for (const sub of ['screens', 'visual']) mkdirSync(join(d, sub));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png', 'screens/s05-desktop.png']) writeFileSync(join(d, f), '');
+  writeFileSync(join(d, 'visual/visual.json'), JSON.stringify({ leads: [{ id: 'V01' }, { id: 'V02' }, { id: 'V03' }, { id: 'V04' }] }));
+  writeFileSync(join(d, 'screens/crawl.json'), JSON.stringify({ unsettled: ['s05'] }));
+  const ledger = '\n## Visual leads\n| Lead | Check | Decision |\n|---|---|---|\n| V01 | pill | P01 |\n| V02 | gap | Rejected: the gap holds a chart that loads later |\n| V03 | menu | P09 |\n';
+  const withDir = check(good.replace('Book step 4, screens/book-1280.png', 'Book step 4, screens/s05-desktop.png') + ledger.replace('| V02 | gap | Rejected: the gap holds a chart that loads later |', '| V02 | gap | Rejected: fine |'), d);
+  const dirExpect = ['V04 not decided', 'P09 is not in Pains', 'V02: decision must be', 's05 was still loading'];
+  const dirMissed = dirExpect.filter(e => !withDir.some(x => x.includes(e)));
+  const dirGood = check(good + ledger.replace('| V03 | menu | P09 |', '| V03 | menu | P02 |\n| V04 | count | Rejected: the badge counts all drafts, as labeled |'), d);
+  console.log(dirMissed.length === 0 ? `PASS  folder checks caught all ${dirExpect.length} problems` : `FAIL  folder checks missed: ${dirMissed.join(', ')}`);
+  console.log(dirGood.length === 0 ? 'PASS  a complete ledger passes' : `FAIL  complete ledger: ${dirGood.join(' | ')}`);
   const g = check(good), b = check(bad);
   const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);
-  process.exit(g.length === 0 && missing.length === 0 ? 0 : 1);
+  process.exit(g.length === 0 && missing.length === 0 && dirMissed.length === 0 && dirGood.length === 0 ? 0 : 1);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compare as file URLs so this also runs on Windows (D:\\... vs file:///D:/...).
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const arg = process.argv[2];
   if (arg === '--self-test') selfTest();
   if (!arg || !existsSync(arg)) { console.error('usage: node <skill>/scripts/check-stage.mjs <pain-map.md> | --self-test'); process.exit(2); }

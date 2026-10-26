@@ -8,17 +8,11 @@
 // The file holds login cookies: keep it out of git, and delete it when the audit is done.
 // Exit 0 saved, 1 not signed in before the timeout, 2 usage or no screen to open a window on.
 import { createRequire } from 'node:module';
-import { launch } from './browser.mjs';
+import { launch, loadPlaywright, settle, normUrl } from './browser.mjs';
 import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 
 const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  for (const name of ['playwright', 'playwright-core']) { try { return require(name); } catch {} }
-  try { return createRequire(join(process.cwd(), 'package.json'))('playwright'); } catch {}
-  console.error('login: Playwright not found. Install it with: npm i -D playwright && npx playwright install chromium');
-  process.exit(2);
-}
 const args = process.argv.slice(2);
 const url = args.find((a, i) => !a.startsWith('--') && !['--out', '--timeout'].includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
@@ -31,8 +25,8 @@ if (!headless && process.platform === 'linux' && !process.env.DISPLAY && !proces
   process.exit(2);
 }
 
-const { chromium } = loadPlaywright();
-const browser = await launch(chromium, { headless });
+const { chromium } = loadPlaywright('login');
+const browser = await launch(chromium, { headless }, 'login');
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
 const page = await context.newPage();
 await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });

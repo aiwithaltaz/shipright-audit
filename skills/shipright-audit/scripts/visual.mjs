@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Measure visual craft the eye misses or argues about: alignment and spacing inside repeated cards,
-// sentence-length pills, crowded pills, corner drift, menus covered by other layers, and counts that
+// sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, and counts that
 // promise items a page does not have. Every finding gets a cropped screenshot.
 // Usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes "#/,#/library"] [--crawl crawl.json]
 //        [--session session.json] [--out dir] [--no-click]
@@ -8,23 +8,18 @@
 // --crawl    take every screen URL from a crawl.json written by crawl.mjs
 // --session  a signed-in session saved by login.mjs
 // --no-click do not open menus (skips the layering check)
-// Opens only menus and popovers (aria-haspopup or aria-expanded). Never clicks anything that says
-// delete, remove, publish, post, send, pay, sign out or log out.
+// Opens only menus and popovers (aria-haspopup or aria-expanded). Never clicks risky words
+// (delete, publish, send, generate, save, sign out and the rest of DANGER in browser.mjs).
+// Waits for each page to settle first, and groups the same problem on several pages into one lead.
 // Writes visual.json, visual.md and V##-*.png crops to --out (default docs/shipright/audit/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
-import { launch } from './browser.mjs';
+import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 
 const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  for (const name of ['playwright', 'playwright-core']) { try { return require(name); } catch {} }
-  try { return createRequire(join(process.cwd(), 'package.json'))('playwright'); } catch {}
-  console.error('visual: Playwright not found. Install it with: npm i -D playwright && npx playwright install chromium');
-  process.exit(2);
-}
 
 const args = process.argv.slice(2);
 const valueFlags = ['--routes', '--crawl', '--session', '--out'];
@@ -58,6 +53,9 @@ function serve(dir) {
 // 6px is the smallest misalignment people notice side by side; 40px is a gap that reads as "empty" in a card.
 const ANALYZE = () => {
   const ALIGN_PX = 6, GAP_MIN = 40, GAP_RATIO = 2.5, PILL_WORDS = 4, PILL_CHARS = 30, PILLS_PER_CARD = 4;
+  // A card's only worded action is buried when 10+ lines of text sit between the title and it.
+  // A card is overloaded when it carries more than 7 small labels and pills to read.
+  const BURIED_BLOCKS = 10, BURIED_MIN_H = 280, LABELS_PER_CARD = 7;
   const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0; };
   const box = el => { const r = el.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height, right: r.right + scrollX, bottom: r.bottom + scrollY }; };
   const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
@@ -157,6 +155,27 @@ const ANALYZE = () => {
         break; // one card per group is enough evidence
       }
     }
+    // Leaf text pieces of a card, top to bottom: what the eye has to read.
+    const leaves = el => [...el.querySelectorAll('*')].filter(x => vis(x) && ownText(x).length > 0 && !x.closest('button, [role=button]')).map(x => ({ x, b: box(x), t: ownText(x) }));
+    // Buried main action: the only worded action sits at the bottom of a tall card, after a long read.
+    for (const c of cards) {
+      if (c.b.h < BURIED_MIN_H) continue;
+      const worded = [...c.el.querySelectorAll('button, [role=button], a')].filter(x => vis(x) && text(x).length > 1 && text(x).length < 40);
+      if (worded.length !== 1) continue;
+      const act = worded[0], ab = box(act);
+      if (ab.y - c.b.y < c.b.h * 0.7) continue;
+      const head = c.el.querySelector('h1, h2, h3, h4, [class*=title i]');
+      const from = head ? box(head).bottom : c.b.y;
+      const between = leaves(c.el).filter(l => l.b.y >= from - 1 && l.b.bottom <= ab.y + 1).length;
+      if (between >= BURIED_BLOCKS) { add({ kind: 'buried-action', what: `"${text(act)}" is the card's only worded action and sits at its bottom, after ${between} pieces of text`, detail: { action: text(act), text_pieces_before: between, card_height: Math.round(c.b.h) } }, c.el); break; }
+    }
+    // Label overload: small all-caps labels and pills each ask to be read; past about 7 a card stops scanning.
+    for (const c of cards) {
+      const small = leaves(c.el).filter(l => { const st = getComputedStyle(l.x); const caps = st.textTransform === 'uppercase' || (l.t === l.t.toUpperCase() && /[A-Z]/.test(l.t)); return caps && parseFloat(st.fontSize) <= 13 && l.t.split(' ').length <= 4; });
+      const pillCount = c.parts.filter(p => p.role === 'pill').length;
+      const labels = new Set([...small.map(l => l.x), ...c.parts.filter(p => p.role === 'pill').map(p => p.el)]).size;
+      if (labels > LABELS_PER_CARD) { add({ kind: 'label-overload', what: `A card asks the eye to read ${labels} small labels and pills (${pillCount} pill${pillCount === 1 ? "" : "s"})`, detail: { labels, pills: pillCount } }, c.el); break; }
+    }
     // Crowded pills: too many chips on one card stop working as labels.
     for (const c of cards) {
       const clusters = {};
@@ -189,7 +208,6 @@ const ANALYZE = () => {
 };
 
 // Find menus and popovers to open. Destructive or session-ending words are never clicked.
-const DANGER = /delete|remove|publish|post\b|send|pay|sign ?out|log ?out|archive|disconnect/i;
 const TRIGGERS = `[aria-haspopup]:not([aria-haspopup="false"]), [aria-expanded="false"]`;
 
 async function openMenus(page, routeId, startFinding) {
@@ -230,12 +248,12 @@ async function openMenus(page, routeId, startFinding) {
     await page.keyboard.press('Escape');
     await page.waitForTimeout(150);
     const after = await page.evaluate(() => new Set([...document.querySelectorAll('body *')].filter(el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; })).size);
-    if (after !== before) await page.reload({ waitUntil: 'domcontentloaded' }).then(() => page.waitForTimeout(300)).catch(() => null);
+    if (after !== before) await page.reload({ waitUntil: 'domcontentloaded' }).then(() => settle(page, { timeout: 6000 })).catch(() => null);
   }
   return { menus: out, next: n };
 }
 
-const { chromium } = loadPlaywright();
+const { chromium } = loadPlaywright('visual');
 const browser = await launch(chromium, {}, 'visual');
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(session ? { storageState: session } : {}) });
 const page = await context.newPage();
@@ -260,12 +278,16 @@ const pages = [];
 const findings = [];
 let n = 0;
 try {
-  for (const url of [...new Set(urls)]) {
-    const routeId = (new URL(url).hash || new URL(url).pathname).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home';
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 20000 }).catch(() => page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }));
-    await page.waitForTimeout(400);
+  for (const url of [...new Set(urls.map(normUrl))]) {
+    const routeId = (new URL(url).hash || new URL(url).pathname).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 40) || 'home';
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+    const settled = await settle(page);
     const a = await page.evaluate(ANALYZE);
+    a.settled = settled;
+    const seenHere = new Set();
     for (const f of a.findings) {
+      if (seenHere.has(f.kind + f.what)) continue; // the same lead twice on one page is one lead
+      seenHere.add(f.kind + f.what);
       const id = `V${String(++n).padStart(2, '0')}`;
       const shot = `${id}-${routeId}-${f.kind}.png`;
       if (f.mark) await page.locator(`[data-srv="${f.mark}"]`).first().screenshot({ path: join(outDir, shot) }).catch(() => null);
@@ -282,7 +304,7 @@ try {
         if (m.radius < 2 && a.medianRadius >= 6) findings.push({ id: `V${String(++n).padStart(2, '0')}`, page: url, kind: 'sharp-corners', what: `The "${m.trigger}" ${m.role} has square corners while cards and buttons use about ${a.medianRadius}px`, detail: { radius: m.radius, usual: a.medianRadius }, shot: m.shot });
       }
     }
-    pages.push({ url, title: a.title, empty: a.empty, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
+    pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
   }
   // Count check: a number on a link should match what its page shows.
   const seenCount = new Set();
@@ -292,7 +314,7 @@ try {
     const url = /^https?:/.test(c.href) ? c.href : new URL(c.href, p.url).href;
     if (new URL(url).origin !== new URL(p.url).origin) continue;
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
-    await page.waitForTimeout(600);
+    await settle(page);
     const empty = await page.evaluate(() => /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test((document.querySelector('main') || document.body).innerText));
     if (empty) {
       const id = `V${String(++n).padStart(2, '0')}`, shot = `${id}-count.png`;
@@ -306,12 +328,23 @@ try {
 }
 
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
-writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, pages: pages.map(p => ({ ...p, url: local(p.url) })), findings: findings.map(f => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
-const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it' };
-const md = ['# Visual checks', '', `${pages.length} page(s) at 1280 wide${session ? ', signed in' : ''}. These are leads: confirm each on the screenshot before it becomes a pain.`, ''];
-md.push('| ID | Check | What it measured | Page | Screenshot |', '| --- | --- | --- | --- | --- |');
-for (const f of findings) md.push(`| ${f.id} | ${KIND[f.kind] || f.kind} | ${f.what.replace(/\|/g, '/')} | ${local(f.page)} | ${f.shot || 'none'} |`);
-if (!findings.length) md.push('| none | | No visual problems measured | | |');
+// One lead per problem: the same check with the same words on several pages is one lead that lists them all.
+const leads = [];
+for (const f of findings) {
+  const key = f.kind + '|' + f.what;
+  const have = leads.find(l => l.key === key);
+  if (have) { if (!have.pages.includes(local(f.page))) have.pages.push(local(f.page)); if (f.shot) have.shots.push(f.shot); continue; }
+  leads.push({ key, id: f.id, kind: f.kind, what: f.what, detail: f.detail, pages: [local(f.page)], shots: f.shot ? [f.shot] : [], shot: f.shot });
+}
+writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads: leads.map(({ key, ...l }) => l), findings: findings.map(f => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
+const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card' };
+const md = ['# Visual checks', '', `${pages.length} page(s) at 1280 wide${session ? ', signed in' : ''}, ${leads.length} lead(s).`, '',
+  'Every lead below must appear in the pain map\'s **Visual leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
+const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));
+if (unsettledPages.length) md.push(`> **Still loading:** ${unsettledPages.join(', ')} kept changing for 10 seconds. Leads there may describe the loading state.`, '');
+md.push('| Lead | Check | What it measured | Pages | Screenshot |', '| --- | --- | --- | --- | --- |');
+for (const l of leads) md.push(`| ${l.id} | ${KIND[l.kind] || l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.pages.join(', ')} | ${l.shot || 'none'} |`);
+if (!leads.length) md.push('| none | | No visual problems measured | | |');
 md.push('', '## Corner scale (px: how many cards, buttons and fields use it)', '');
 for (const p of pages) md.push(`- ${local(p.url)}: ${Object.entries(p.corner_scale).map(([r, c]) => `${r}px x${c}`).join(', ') || 'none measured'}`);
 const allCounts = pages.flatMap(p => p.counts.map(c => `${c.label} ${c.count}`));
@@ -319,4 +352,4 @@ if (allCounts.length) md.push('', '## Numbers on navigation', '', ...[...new Set
 const emptyPages = pages.filter(p => p.empty).length;
 if (emptyPages) md.push('', `## Empty pages: ${emptyPages} of ${pages.length}`, '', 'Pages with little or no data hide density, pill and alignment problems. Prefer an account with realistic data.');
 writeFileSync(join(outDir, 'visual.md'), md.join('\n') + '\n');
-console.log(`visual: ${pages.length} page(s), ${findings.length} lead(s)${emptyPages ? `, ${emptyPages} empty page(s)` : ''} · ${outDir}`);
+console.log(`visual: ${pages.length} page(s), ${leads.length} lead(s)${emptyPages ? `, ${emptyPages} empty page(s)` : ''} · ${outDir}`);

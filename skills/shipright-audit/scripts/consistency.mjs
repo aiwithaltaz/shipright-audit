@@ -6,19 +6,12 @@
 // badge colors that are not a hex token from --tokens, and label-table misses.
 // Exit 0 pass, 1 fail, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
-import { launch } from './browser.mjs';
+import { launch, loadPlaywright, settle, normUrl } from './browser.mjs';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep } from 'node:path';
 
 const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  const tries = ['playwright', 'playwright-core'];
-  for (const name of tries) { try { return require(name); } catch {} }
-  try { return createRequire(join(process.cwd(), 'package.json'))('playwright'); } catch {}
-  console.error('consistency: Playwright not found. Install it with: npm i -D playwright && npx playwright install chromium');
-  process.exit(2);
-}
 const args = process.argv.slice(2);
 const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--labels' && args[i - 1] !== '--tokens');
 if (!target) {
@@ -52,8 +45,8 @@ function serve(dir) {
   });
 }
 
-const { chromium } = loadPlaywright();
-const browser = await launch(chromium, { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const { chromium } = loadPlaywright('consistency');
+const browser = await launch(chromium, { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] }, 'consistency');
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 let server;
 try {

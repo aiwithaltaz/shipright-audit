@@ -7,7 +7,7 @@
 // paired skill-minus-baseline differences with a cluster bootstrap over (case, model) cells and runs; sign test.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, mkdtempSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -199,7 +199,7 @@ function selfTest() {
   process.exit(bad ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const args = process.argv.slice(2);
   if (args.includes('--self-test')) selfTest();
   const gradeDir = args[0] && resolve(args[0]);

@@ -9,18 +9,12 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
-import { launch } from './browser.mjs';
+import { launch, loadPlaywright, settle, normUrl } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 
 const require = createRequire(import.meta.url);
-function loadPlaywright() {
-  const tries = ['playwright', 'playwright-core', '/opt/node22/lib/node_modules/playwright'];
-  for (const name of tries) { try { return require(name); } catch {} }
-  console.error('crawl: Playwright not found. Install it with: npm i -D playwright && npx playwright install chromium');
-  process.exit(2);
-}
 
 const args = process.argv.slice(2);
 const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
@@ -115,10 +109,10 @@ function sameApp(href, base) {
   } catch { return false; }
 }
 
-const { chromium } = loadPlaywright();
+const { chromium } = loadPlaywright('crawl');
 const browser = await launch(chromium, {
   args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-});
+}, 'crawl');
 const context = await browser.newContext(session ? { storageState: session } : {});
 const page = await context.newPage();
 page.on('console', msg => { if (msg.type() === 'error') noteError(msg.text()); });
@@ -136,31 +130,31 @@ if (!remote) {
 const screens = [];
 const seen = new Set();
 try {
-  await page.goto(startUrl, { waitUntil: 'networkidle', timeout: 20000 });
-  await page.waitForTimeout(300);
-  screens.push(await snapshot(page, 's01', false));
+  await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  let settled = await settle(page);
+  screens.push({ ...(await snapshot(page, 's01', false)), settled });
   const did = await signIn(page);
-  if (did) screens.push(await snapshot(page, 's02', true));
+  if (did) { settled = await settle(page); screens.push({ ...(await snapshot(page, 's02', true)), settled }); }
   const queue = [];
   const pushLinks = links => {
     for (const href of links || []) {
       if (!sameApp(href, page.url())) continue;
-      const abs = new URL(href, page.url()).href;
+      const abs = normUrl(new URL(href, page.url()).href);
       if (!seen.has(abs)) queue.push(abs);
     }
   };
-  seen.add(page.url());
-  for (const s of screens) { seen.add(s.url); pushLinks(s.links); }
+  seen.add(normUrl(page.url()));
+  for (const s of screens) { seen.add(normUrl(s.url)); pushLinks(s.links); }
   let n = screens.length;
   while (queue.length && n < 12) {
     const next = queue.shift();
     if (seen.has(next)) continue;
     seen.add(next);
     await page.goto(next, { waitUntil: 'domcontentloaded', timeout: 15000 });
-    await page.waitForTimeout(250);
+    settled = await settle(page);
     n += 1;
     const id = `s${String(n).padStart(2, '0')}`;
-    const shot = await snapshot(page, id, true);
+    const shot = { ...(await snapshot(page, id, true)), settled };
     screens.push(shot);
     pushLinks(shot.links);
   }
@@ -183,14 +177,16 @@ for (const s of screens) for (const l of s.link_labels || []) {
 const labelDrift = [...byTarget].filter(([, m]) => m.size > 1).map(([t, m]) => ({ target: t, labels: [...m.values()].map(v => v.label), where: Object.fromEntries([...m.values()].map(v => [v.label, [...v.screens]])) }));
 const loginWall = screens.length > 0 && screens.every(s => s.asks_password || /login|sign-?in|signup|sign-?up|register|auth/i.test(s.route + s.url));
 const emptyScreens = screens.filter(s => s.looks_empty).length;
-const report = { target, signed_in_session: !!session, login_wall: loginWall, empty_screens: emptyScreens, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+const unsettled = screens.filter(s => s.settled === false).map(s => s.id);
+const report = { target, signed_in_session: !!session, login_wall: loginWall, empty_screens: emptyScreens, unsettled, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
-  md.push(`| ${s.id} | ${s.route} | ${s.signed_in ? 'yes' : 'no'} | ${s.h1.replace(/\|/g, '/')} | ${s.actions.length} | ${s.fields.length} | ${s.console_errors.length} |`);
+  md.push(`| ${s.id}${s.settled === false ? ' (may be mid-load)' : ''} | ${s.route} | ${s.signed_in ? 'yes' : 'no'} | ${s.h1.replace(/\|/g, '/')} | ${s.actions.length} | ${s.fields.length} | ${s.console_errors.length} |`);
 }
 if (loginWall) md.splice(1, 0, '', '> **Login wall:** every screen reached asks for a password. Stop and ask the owner for a way in (login.mjs), or audit only the sign-in screens and say so.');
 if (emptyScreens && emptyScreens * 2 >= screens.length) md.splice(1, 0, '', `> **Mostly empty:** ${emptyScreens} of ${screens.length} screens show little or no data. Density, pill and alignment problems hide on empty screens. Ask for an account with realistic data.`);
+if (unsettled.length) md.splice(1, 0, '', `> **Still loading:** ${unsettled.join(', ')} kept changing for 10 seconds. Their counts and empty messages may be the loading state, not the real data. Check them before citing.`);
 if (labelDrift.length) {
   md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
   for (const d of labelDrift) md.push(`| ${d.target.replace(/^https?:\/\/[^/]+/, '')} | ${d.labels.join(' / ')} | ${Object.entries(d.where).map(([l, ss]) => `${l}: ${ss.join(', ')}`).join('; ')} |`);

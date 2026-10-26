@@ -69,9 +69,9 @@ if (hasPw) {
   const vout = mkdtempSync(join(tmpdir(), 'visual-test-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'tests/fixtures/visual-app/index.html', '--out', vout]);
   const kinds = new Set(JSON.parse(readFileSync(join(vout, 'visual.json'), 'utf8')).findings.map(f => f.kind));
-  const want = ['sentence-pill', 'crowded-pills', 'misaligned', 'big-gap', 'covered-menu', 'sharp-corners', 'count-mismatch'];
+  const want = ['sentence-pill', 'crowded-pills', 'misaligned', 'big-gap', 'covered-menu', 'sharp-corners', 'count-mismatch', 'buried-action', 'label-overload'];
   const lost = want.filter(k => !kinds.has(k));
-  ok('visual checker finds all 7 planted kinds', lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
+  ok(`visual checker finds all ${want.length} planted kinds after a slow load`, lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
   const noise = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8')).findings.length;
@@ -91,12 +91,27 @@ if (hasPw) {
   const base = `http://127.0.0.1:${server.address().port}/index.html`;
   const saved = join(mkdtempSync(join(tmpdir(), 'login-')), 's.json'), never = join(mkdtempSync(join(tmpdir(), 'login-')), 'n.json');
   const runAsync = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root }); p.on('close', code => res(code)); });
+  // 11. Live-app safety: the walker holds back typing into a form on an http(s) app
+  const mini = createServer((req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end(readFileSync(join(root, 'tests/fixtures/mini-app/index.html'))); });
+  await new Promise(r => mini.listen(0, '127.0.0.1', r));
+  const hdir = mkdtempSync(join(tmpdir(), 'held-')), hplan = join(hdir, 'plan.json');
+  writeFileSync(hplan, JSON.stringify({ task: 'Type into a live form', steps: [{ do: 'fill', field: 'Name', value: 'test' }] }));
+  const hcode = await runAsync(['skills/shipright-audit/scripts/walk.mjs', `http://127.0.0.1:${mini.address().port}/`, hplan, '--out', join(hdir, 'out')]);
+  mini.close();
+  const hw = JSON.parse(readFileSync(join(hdir, 'out', 'walk.json'), 'utf8')).widths;
+  ok('walker holds back typing in a live app', hcode === 0 && hw['1280'].held_at === 1 && hw['1280'].actions === 0, `exit ${hcode}, held at ${hw['1280'].held_at}`);
   const okCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', `${base}?auto`, '--headless', '--timeout', '20', '--out', saved]);
   const failCode = await runAsync(['skills/shipright-audit/scripts/login.mjs', base, '--headless', '--timeout', '4', '--out', never]);
   server.close();
   ok('login.mjs saves a signed-in session', okCode === 0 && existsSync(saved) && JSON.parse(readFileSync(saved, 'utf8')).cookies.some(c => c.name === 'sr_test'), `exit ${okCode}`);
   ok('login.mjs fails cleanly when nobody signs in', failCode === 1 && !existsSync(never), `exit ${failCode}`);
 } else ok('seeded apps match their answer keys', true, 'SKIPPED: Playwright not installed (npm i -D playwright)');
+
+// 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
+r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
+ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);
+r = run(['skills/shipright-audit/scripts/setup.mjs', '--check']);
+ok('setup.mjs reports Playwright', r.status === (hasPw ? 0 : 1), r.stdout.trim());
 
 for (const t of results) console.log(`${t.pass ? 'PASS' : 'FAIL'}  ${t.name}${t.note ? `  (${t.note})` : ''}`);
 const failed = results.filter(t => !t.pass).length;

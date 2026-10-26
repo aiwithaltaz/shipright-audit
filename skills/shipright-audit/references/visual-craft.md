@@ -1,7 +1,7 @@
 # Visual craft lens
 
 Use in Step 5 (Pass 3). Look at each main screen at full desktop width, then at 390. Name the item (V1 to V8) a pain breaks.
-These are the problems a design lead spots in a second and usability checklists miss. `visual.mjs` measures V1, V2, V5, V6, V7 and V8; V3 and V4 need your eyes.
+These are the problems a design lead spots in a second and usability checklists miss. `visual.mjs` measures V1, V2, V5, V6, V7 and V8, and flags the clearest cases of V3 (too many labels on a card) and V4 (the only action buried at the bottom of a tall card). Density and placement still need your eyes on every main screen.
 
 Contents: V1 Pills · V2 Counts · V3 Density · V4 Where the main action sits · V5 Alignment · V6 Spacing · V7 Shape and elevation · V8 Layering
 
@@ -62,7 +62,9 @@ A list exists to be scanned. Ask: what is the one thing the user looks for in ea
 
 ## Judging visual leads from visual.mjs
 
-- **Confirm on the crop.** Dismiss a lead when the difference is intended (a featured card) or invisible at normal size.
+- **Decide every lead.** Each one gets a row in Visual leads: the pain it became, or "Rejected:" and what you saw. A lead dropped silently is how an audit misses what the owner spots in a second.
+- **Confirm on the crop.** Reject a lead when the difference is intended (a featured card) or invisible at normal size, and say which.
+- **Several leads, one pain.** Misaligned dates and a big gap in the same cards can be one pain ("Card footers float"), but each lead still gets its row pointing to it.
 - **Cite the crop** as the evidence for the pain.
 - **Cause:** usually layout (V3 to V8) or copy (V1, V2).
 - **Severity:** usually 1 or 2. Use 3 when it hides the main action, misleads (V2), or repeats on every screen.
