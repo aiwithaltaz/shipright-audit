@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2-beta.1 (2026-10-26)
+
+From the SocialGhost signed-in audit, where "Sign in with Google" kept reloading and nobody could sign in.
+- **The sign-in window is now a normal browser.** It opens your installed Edge or Chrome with its own kept profile, without the "controlled by automated software" flag that Google and other pop-up sign-ins refuse. A test checks that the window no longer announces automation.
+- **Closing the window early no longer saves a signed-out session.** It saves only once you are signed in.
+- **Next time is faster:** the profile is kept in `~/.shipright/profiles/<site>`, so the next audit of the same site usually opens already signed in. Delete that folder to forget it.
+
 ## 0.4.1-beta.1 (2026-10-26)
 
 - **Updates without GitHub.** When a newer version is out, the audit ends its reply with "Say 'update it' and I'll fetch it." On yes, `version.mjs --fetch` refreshes Claude Code's saved copy of the marketplace, which the desktop app never refreshes on its own. Then: restart, `/plugin`, Installed, Shipright audit, Update.
