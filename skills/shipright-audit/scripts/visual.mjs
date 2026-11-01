@@ -11,7 +11,7 @@
 // Opens only menus and popovers (aria-haspopup or aria-expanded). Never clicks risky words
 // (delete, publish, send, generate, save, sign out and the rest of DANGER in browser.mjs).
 // Waits for each page to settle first, and groups the same problem on several pages into one lead.
-// Writes visual.json, visual.md and V##-*.png crops to --out (default docs/shipright/audit/visual).
+// Writes visual.json, visual.md and V##-*.png crops to --out (the skill passes <audit>/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
 import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
@@ -26,7 +26,7 @@ const valueFlags = ['--routes', '--crawl', '--session', '--out'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes ...] [--crawl crawl.json] [--session file] [--out dir] [--no-click]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audit', 'visual'));
+const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'visual'));
 mkdirSync(outDir, { recursive: true });
 const session = flag('--session');
 if (session && !existsSync(session)) { console.error(`visual: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
@@ -202,9 +202,30 @@ const ANALYZE = () => {
     const label = text(host).replace(text(el), '').trim();
     if (label) counts.push({ label, count: Number(text(el)), href: host.getAttribute('href') || null, mark: tag(host) });
   }
+  // Style inventory for the taste pass: signals, not verdicts.
+  const textEls = [...document.querySelectorAll('body *')].filter(el => vis(el) && ownText(el).length > 1);
+  const weight = el => ownText(el).length;
+  const tally = (f) => { const m = {}; for (const el of textEls) { const k = f(el); if (k) m[k] = (m[k] || 0) + weight(el); } return m; };
+  const families = tally(el => getComputedStyle(el).fontFamily.split(',')[0].replace(/["']/g, '').trim());
+  const sizes = tally(el => Math.round(parseFloat(getComputedStyle(el).fontSize)) + 'px');
+  const rgb = c => (c.match(/[\d.]+/g) || []).map(Number);
+  const isAccent = c => { const [r, g, b, a = 1] = rgb(c); if (a < 0.5) return false; const mx = Math.max(r, g, b), mn = Math.min(r, g, b); return mx > 40 && (mx - mn) / mx > 0.25; };
+  const accents = new Set();
+  for (const el of document.querySelectorAll('body *')) { if (!vis(el)) continue; const st = getComputedStyle(el); for (const c of [st.color, st.backgroundColor]) if (isAccent(c)) { const [r, g, b] = rgb(c); accents.add([r, g, b].map(v => Math.round(v / 32)).join(',')); } }
+  const lines = [...document.querySelectorAll('p, li, dd, blockquote')].filter(el => vis(el) && text(el).length > 120).map(el => { const fs = parseFloat(getComputedStyle(el).fontSize) || 16; return Math.round(el.getBoundingClientRect().width / (fs * 0.5)); });
+  const sortedLines = lines.sort((a, b) => a - b);
+  const top = m => Object.entries(m).sort((a, b) => b[1] - a[1]);
+  const style = {
+    font_families: top(families).filter(([, n]) => n >= 20).map(([f]) => f),
+    font_sizes: top(sizes).filter(([, n]) => n >= 10).map(([z]) => z),
+    accent_colors: accents.size,
+    line_length_chars: sortedLines.length ? { median: sortedLines[Math.floor(sortedLines.length / 2)], max: sortedLines[sortedLines.length - 1] } : null,
+    all_caps_long: textEls.filter(el => { const t = ownText(el); return t.length > 40 && t === t.toUpperCase() && /[A-Z]/.test(t) || (getComputedStyle(el).textTransform === 'uppercase' && t.length > 40); }).length,
+    emoji_icons: [...document.querySelectorAll('button, a, [role=button], nav *')].filter(el => vis(el) && /\p{Extended_Pictographic}/u.test(ownText(el))).length,
+  };
   const main = document.querySelector('main') || document.body;
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
-  return { findings, medianRadius, scale, counts, empty, title: document.title };
+  return { findings, medianRadius, scale, counts, empty, style, title: document.title };
 };
 
 // Find menus and popovers to open. Destructive or session-ending words are never clicked.
@@ -304,7 +325,7 @@ try {
         if (m.radius < 2 && a.medianRadius >= 6) findings.push({ id: `V${String(++n).padStart(2, '0')}`, page: url, kind: 'sharp-corners', what: `The "${m.trigger}" ${m.role} has square corners while cards and buttons use about ${a.medianRadius}px`, detail: { radius: m.radius, usual: a.medianRadius }, shot: m.shot });
       }
     }
-    pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
+    pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, style: a.style, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
   }
   // Count check: a number on a link should match what its page shows.
   const seenCount = new Set();
@@ -345,6 +366,8 @@ if (unsettledPages.length) md.push(`> **Still loading:** ${unsettledPages.join('
 md.push('| Lead | Check | What it measured | Pages | Screenshot |', '| --- | --- | --- | --- | --- |');
 for (const l of leads) md.push(`| ${l.id} | ${KIND[l.kind] || l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.pages.join(', ')} | ${l.shot || 'none'} |`);
 if (!leads.length) md.push('| none | | No visual problems measured | | |');
+md.push('', '## Style inventory (for the taste pass)', '', 'Signals, not verdicts. Read them with `references/taste.md`: 1 or 2 families, about 5 to 7 sizes, one accent, lines of 45 to 75 characters.', '', '| Page | Font families | Font sizes | Accent colors | Line length (median / max chars) | Long all-caps text | Emoji as icons |', '| --- | --- | --- | --- | --- | --- | --- |');
+for (const p of pages) { const st = p.style || {}; md.push(`| ${local(p.url)} | ${(st.font_families || []).join(', ').replace(/\|/g, '/') || 'none'} (${(st.font_families || []).length}) | ${(st.font_sizes || []).length}: ${(st.font_sizes || []).join(' ')} | ${st.accent_colors ?? 0} | ${st.line_length_chars ? `${st.line_length_chars.median} / ${st.line_length_chars.max}` : 'no long text'} | ${st.all_caps_long || 0} | ${st.emoji_icons || 0} |`); }
 md.push('', '## Corner scale (px: how many cards, buttons and fields use it)', '');
 for (const p of pages) md.push(`- ${local(p.url)}: ${Object.entries(p.corner_scale).map(([r, c]) => `${r}px x${c}`).join(', ') || 'none measured'}`);
 const allCounts = pages.flatMap(p => p.counts.map(c => `${c.label} ${c.count}`));

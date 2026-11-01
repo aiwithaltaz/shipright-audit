@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Let the owner sign in by hand, then save the session so crawl, walk and visual can work behind the login.
 // Claude never sees or types the password: the owner signs in in a real browser window.
-// Usage: node <skill>/scripts/login.mjs <url> [--out docs/shipright/audit/.session.json] [--timeout 300]
+// Usage: node <skill>/scripts/login.mjs <url> [--out <audit>/.session.json] [--timeout 300]
 //        [--profile dir]  where the window keeps its browser profile (default ~/.shipright/profiles/<site>)
 //        [--headless]     for automated tests only: no window, works only if the page signs in by itself
 // The window is a normal browser profile in the installed Microsoft Edge or Google Chrome (Playwright's
@@ -21,7 +21,7 @@ const args = process.argv.slice(2);
 const url = args.find((a, i) => !a.startsWith('--') && !['--out', '--timeout', '--profile'].includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 if (!url || !/^https?:/.test(url)) { console.error('usage: node <skill>/scripts/login.mjs <https://your-app> [--out file] [--timeout seconds] [--profile dir]'); process.exit(2); }
-const out = resolve(flag('--out') || join('docs', 'shipright', 'audit', '.session.json'));
+const out = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', '.session.json'));
 const timeoutMs = Number(flag('--timeout') || 300) * 1000;
 const headless = args.includes('--headless');
 if (!headless && process.platform === 'linux' && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {

@@ -9,7 +9,8 @@ user-invocable: false
 You are an expert Staff Product Designer auditing an app someone already built.
 Find what works, what hurts and why, and what to fix first. Every claim has evidence. You change nothing.
 
-Output: `docs/shipright/audit/pain-map.md` and a short reply.
+Output: `<audit>/pain-map.md` and a short reply.
+`<audit>` is this audit's own folder: `docs/shipright/audits/<YYYY-MM-DD>-<site>/` (site: the app's host name, like `app-example-com`, or its folder name). Create it at the start. Every file this audit writes goes inside it: screenshots, walks, plans, scratch scripts, the session file. Never move, rename or delete another audit's folder.
 In this skill, a problem is always called a **pain**. A thing that works is always called a **Keep**.
 `<skill>` is the folder that holds this SKILL.md. Execute the scripts in `<skill>/scripts/`; do not read them as instructions. When you show the owner a command, write the real folder path, never `<skill>`.
 
@@ -25,6 +26,7 @@ Audit progress:
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
 - [ ] 5. Pass 3: visual craft checked
+- [ ] 5b. Pass 4: taste checked, First impression filled
 - [ ] 6. Keeps named
 - [ ] 7. Pains written and merged
 - [ ] 8. Missing pages and jobs found
@@ -34,7 +36,7 @@ Audit progress:
 
 ## Rules that never bend
 
-- **Read-only code.** Do not edit app files, add packages to the app's project, deploy or push. Write only under `docs/shipright/audit/`.
+- **Read-only code.** Do not edit app files, add packages to the app's project, deploy or push. Write only inside `<audit>/`. If any tool you use saves files elsewhere (for example a browser tool's own folder such as `.playwright-mcp`), move them into `<audit>/` before you finish and list them in Left behind. Prefer the scripts here over other browser tools.
 - **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus, reading pages and typing in search boxes are fine. Do not type into composers, editors or forms: many autosave. Keep a list of everything you create or change.
 - **Evidence for every pain.** A pain needs a screen and a screenshot that exists on disk. No evidence, no pain.
 - **Only claim what you finished.** Never say you checked something you did not. If a width, a state or a flow was not seen, it goes in Not verified, never in the findings.
@@ -51,7 +53,7 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
 2. **Version.** Execute `node <skill>/scripts/version.mjs`. Never stop for it. If it says a newer version is out, end the reply with the update note (below).
 3. **Tools.** Execute `node <skill>/scripts/setup.mjs`. It installs Playwright in a ShipRight tools folder in the user's home, never in the app, and does nothing if Playwright is already there. Do not ask first. If it fails, audit by hand and say what that cost.
 4. **Check the door.** Run the crawl (Step 1). Then:
-   - **Login wall:** execute `node <skill>/scripts/login.mjs <url>` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in." The session goes to `docs/shipright/audit/.session.json`. Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. Then crawl again with `--session`. If the window closes without a session, say so and offer to open it again. The window keeps its own browser profile, so the next audit of the same site usually opens already signed in. In Left behind, name both the session file and the profile folder (`~/.shipright/profiles/<site>`).
+   - **Login wall:** execute `node <skill>/scripts/login.mjs <url> --out <audit>/.session.json` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in."  Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. Then crawl again with `--session`. If the window closes without a session, say so and offer to open it again. The window keeps its own browser profile, so the next audit of the same site usually opens already signed in. In Left behind, name both the session file and the profile folder (`~/.shipright/profiles/<site>`).
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported.
@@ -62,7 +64,7 @@ If the owner gives instructions at any point (what to skip, what is allowed), fo
 
 ## Step 1: Reach every screen
 
-`node <skill>/scripts/crawl.mjs <index.html or url> [--session docs/shipright/audit/.session.json] --out docs/shipright/audit/screens`
+`node <skill>/scripts/crawl.mjs <index.html or url> [--session <audit>/.session.json] --out <audit>/screens`
 
 - It saves every reachable screen at 390 and 1280 wide, with its H1, actions, form fields and console errors.
 - Every script waits for each page to settle (no spinners, numbers stop changing) before reading it. `crawl.md` marks a screen that never settled as **may be mid-load**: do not cite its counts or empty messages as real.
@@ -80,8 +82,8 @@ From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. W
 
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note where it broke.
 
-1. Write a plan file, `docs/shipright/audit/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step.
-2. Execute `node <skill>/scripts/walk.mjs <index.html or url> docs/shipright/audit/walks/<task>.json [--session ...] --out docs/shipright/audit/walks/<task>`.
+1. Write a plan file, `<audit>/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step.
+2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [--session ...] --out <audit>/walks/<task>`.
 3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
 4. Use those step screenshots as evidence for pains inside the flow.
 
@@ -99,10 +101,16 @@ Read `references/heuristics.md` and check every screen in scope against the 10 u
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
-1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl docs/shipright/audit/screens/crawl.json [--session ...] --out docs/shipright/audit/visual`. It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, and counts with nothing behind them. It opens menus but never clicks risky words. The same problem on several pages is one lead.
+1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [--session ...] --out <audit>/visual`. It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, and counts with nothing behind them. It opens menus but never clicks risky words. The same problem on several pages is one lead.
 2. Open `visual.md` and each crop. **Decide every lead** in the pain map's **Visual leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
 3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
 4. Cite the crop or the full screenshot as evidence.
+
+## Step 5b: Pass 4, taste
+
+Owners often say "it works, but I'm not a fan of the UI", and checklists never catch it. Read `references/taste.md` and judge each main screen at full desktop width, then phone width: the 5-second first impression, one focal point, type, color, space, surfaces, icons and imagery, the generic look, and polish. Use the **Style inventory** in `visual.md` as signals.
+
+Fill the **First impression** section of the pain map: a score of 1 to 5 for T1 to T9, one line each, and a 2 or 3 sentence verdict a designer would sign. Turn what you can point to on a screenshot into pains with the lens "Taste: T#". Say in the reply that taste is judgment and the owner decides.
 
 ## Step 6: Name the Keeps
 
@@ -151,7 +159,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 
 **The gate (validate, fix, repeat).**
 
-1. Execute `node <skill>/scripts/check-stage.mjs docs/shipright/audit/pain-map.md`. It lists each failed box with the row to fix, and checks that every cited screenshot exists. If Node is not available, check each box yourself.
+1. Execute `node <skill>/scripts/check-stage.mjs <audit>/pain-map.md`. It lists each failed box with the row to fix, and checks that every cited screenshot exists. If Node is not available, check each box yourself.
 2. Fix every failed box, then check again. Repeat up to 3 times. If a box still fails, stop and report which one and why.
 
 - [ ] Scope, out of scope and reviewer count are stated.
@@ -160,6 +168,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
 - [ ] Every visual lead is decided in Visual leads: a pain ID, or Rejected with a reason.
+- [ ] First impression has a score and a reason for T1 to T9, and a verdict.
 - [ ] No pain rests on a screenshot the crawl saved mid-load, unless loading is the pain.
 - [ ] No duplicate pains, and one problem per row.
 - [ ] Missing has rows, or says "None found" with what was checked.
@@ -170,22 +179,23 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 
 ## Output
 
-Copy `templates/pain-map.md` to `docs/shipright/audit/pain-map.md` and fill every section.
+Copy `templates/pain-map.md` to `<audit>/pain-map.md` and fill every section.
 
 ## The reply
 
 Keep it short. In this order:
 
 1. **Verdict in one line:** how ready the app is, and the one theme to fix first. Then one line: "Gate: passed" or "Gate: failed on <box>".
-2. **Keeps:** the top 3, one line each.
-3. **Top pains:** up to 5 Blockers and Majors, each with its screenshot.
-4. **Themes:** 3 to 5, with the pain IDs in each.
-5. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide".
-6. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
-7. **Not verified:** what you could not check.
-8. **Left behind:** everything you created or changed in the app (test items, drafts, notifications) and in the folder (packages, the session file). Offer to remove what you can. Always remind the owner to delete `.session.json`.
-9. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
-10. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
+2. **First impression:** the 2 or 3 sentence taste verdict and the lowest-scoring T areas.
+3. **Keeps:** the top 3, one line each.
+4. **Top pains:** up to 5 Blockers and Majors, each with its screenshot.
+5. **Themes:** 3 to 5, with the pain IDs in each.
+6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide".
+7. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
+8. **Not verified:** what you could not check.
+9. **Left behind:** everything you created or changed in the app (test items, drafts, notifications) and in the folder (packages, the session file). Offer to remove what you can. Always remind the owner to delete `.session.json`.
+10. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
+11. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
 
 ## Never
 

@@ -49,7 +49,7 @@ const session = si >= 0 ? args[si + 1] : null;
 if (session && !existsSync(session)) { console.error(`walk: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
 const oi = args.indexOf('--out');
 const slug = String(plan.task || basename(planPath, '.json')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'task';
-const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audit', 'walks', slug));
+const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audits', 'current', 'walks', slug));
 mkdirSync(outDir, { recursive: true });
 
 const remote = /^https?:/.test(target);

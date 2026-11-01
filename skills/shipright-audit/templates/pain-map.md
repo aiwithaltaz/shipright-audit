@@ -5,6 +5,22 @@ Scope: <the core tasks audited>
 Out of scope: <what was not audited>
 Context used: <users, business goal, analytics, owner complaints: or "none given">
 
+## First impression
+
+<2 or 3 sentences: what a new user feels in the first 5 seconds, and the one change that would help most>
+
+| Area | Score (1-5) | Why |
+|---|---|---|
+| T1 First impression | | |
+| T2 One focal point | | |
+| T3 Typography | | |
+| T4 Color | | |
+| T5 Space and rhythm | | |
+| T6 Surfaces and depth | | |
+| T7 Icons and imagery | | |
+| T8 The generic look | | |
+| T9 Detail and polish | | |
+
 ## Screens
 
 | Screen | Job | Primary action | Actions | States seen | Screenshot |

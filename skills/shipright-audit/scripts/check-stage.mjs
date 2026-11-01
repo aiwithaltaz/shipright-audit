@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const SECTIONS = ['Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
+const SECTIONS = ['First impression', 'Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
 const CAUSES = ['layout', 'flow', 'copy', 'missing feature', 'data model', 'rules or prerequisites', 'performance', 'trust', 'access'];
 const SEVERITY_WORDS = { blocker: 4, major: 3, minor: 2, polish: 1 };
 
@@ -42,6 +42,19 @@ export function check(md, dir = null) {
   if (/<[a-z][^>]*>/i.test(md.replace(/```[\s\S]*?```/g, ''))) errors.push('Template placeholders like <app name> are still in the file. Replace every one.');
   for (const s of SECTIONS) if (!sections[s]) errors.push(`Missing section "## ${s}".`);
   for (const f of ['Scope:', 'Out of scope:', 'Reviewers:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
+
+  // Taste pass: a score and a reason for each of T1 to T9, and a short verdict above the table.
+  if (sections['First impression']) {
+    const fi = table(sections['First impression']);
+    for (let t = 1; t <= 9; t++) {
+      const row = fi.rows.find(r => new RegExp(`^T${t}\\b`).test(r[0]));
+      if (!row) { errors.push(`First impression: add a row for T${t} (see references/taste.md).`); continue; }
+      if (!/^[1-5]$/.test(cell(fi, row, 'score').trim())) errors.push(`First impression T${t}: score must be 1 to 5.`);
+      if (cell(fi, row, 'why').split(/\s+/).filter(Boolean).length < 3) errors.push(`First impression T${t}: say why in a few words.`);
+    }
+    const verdict = sections['First impression'].filter(l => l.trim() && !l.trim().startsWith('|')).join(' ');
+    if (verdict.split(/\s+/).filter(Boolean).length < 12) errors.push('First impression: write a 2 or 3 sentence verdict above the table.');
+  }
 
   const screens = table(sections['Screens'] || []);
   if (!screens.rows.length) errors.push('Screens: no rows. List every screen in scope.');
@@ -156,6 +169,20 @@ Scope: booking
 Out of scope: admin
 Context used: none given
 
+## First impression
+It reads as a calm booking tool, but four equal stat cards compete with the booking button. One clear focal point would help most.
+| Area | Score (1-5) | Why |
+|---|---|---|
+| T1 Area | 3 | fine but plain here |
+| T2 Area | 3 | fine but plain here |
+| T3 Area | 3 | fine but plain here |
+| T4 Area | 3 | fine but plain here |
+| T5 Area | 3 | fine but plain here |
+| T6 Area | 3 | fine but plain here |
+| T7 Area | 3 | fine but plain here |
+| T8 Area | 3 | fine but plain here |
+| T9 Area | 3 | fine but plain here |
+
 ## Screens
 | Screen | Job | Primary action | Actions | States seen | Screenshot |
 |---|---|---|---|---|---|
@@ -210,7 +237,10 @@ Context used: none given
     .replace('- Screen reader behavior', '')
     .replace('| P01 | Rule shown late |', '| P01 | Rule shown late; no Back button. Users lose work. Cancel wipes it. |')
     .replace('| 404 | Lost users | |', '')
-    .replace('- Nothing: no test data was created', '');
+    .replace('- Nothing: no test data was created', '')
+    .replace('| T9 Area | 3 | fine but plain here |', '')
+    .replace('| T8 Area | 3 | fine but plain here |', '| T8 Area | 7 | x |')
+    .replace('It reads as a calm booking tool, but four equal stat cards compete with the booking button. One clear focal point would help most.', '');
   // Folder checks: an undecided visual lead, a lead pointing at a missing pain, a vague rejection,
   // and a pain that cites a screenshot the crawl saved mid-load.
   const d = mkdtempSync(join(tmpdir(), 'gate-'));
@@ -226,7 +256,7 @@ Context used: none given
   console.log(dirMissed.length === 0 ? `PASS  folder checks caught all ${dirExpect.length} problems` : `FAIL  folder checks missed: ${dirMissed.join(', ')}`);
   console.log(dirGood.length === 0 ? 'PASS  a complete ledger passes' : `FAIL  complete ledger: ${dirGood.join(' | ')}`);
   const g = check(good), b = check(bad);
-  const expect = ['duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
+  const expect = ['row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);

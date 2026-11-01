@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0-beta.1 (2026-11-01)
+
+From the SocialGhost audits: 8 of 8 findings were right, but the owner's main complaint ("I'm not a fan of the UI") was never checked, the crawl saw only the first screen of a long landing page, and the audit mixed its files with earlier audits.
+
+- **New Pass 4: taste** (`references/taste.md`): the 5-second first impression, one focal point, typography, color, space, surfaces, icons and imagery, the generic template look, and polish. The pain map gets a **First impression** section scoring T1 to T9 with reasons, and the gate checks it.
+- **Style inventory in `visual.mjs`:** font families, font sizes, accent colors, line length, long all-caps text and emoji used as icons, per page.
+- **Full-page screenshots:** the crawl now saves each whole page at 1280 and 390 (capped at 6000px), not just the first screen.
+- **One folder per audit:** `docs/shipright/audits/<date>-<site>/`. Earlier audits are never moved or renamed.
+- **No stray files:** anything another browser tool saves outside the audit folder is moved in and listed in Left behind.
+
 ## 0.4.3-beta.1 (2026-10-26)
 
 - **Fixed the reloading sign-in window.** While waiting for the owner, `login.mjs` read the browser's saved storage every 1.5 seconds. For every site the window had visited, Google's sign-in included, Playwright opens a hidden tab to read it, so the window kept flashing and "Sign in with Google" broke. It now reads storage only once the page looks signed in.

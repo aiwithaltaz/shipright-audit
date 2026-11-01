@@ -4,7 +4,8 @@
 // --session: a signed-in session saved by login.mjs, so the crawl can reach screens behind the login.
 // Also reports a login wall (every screen asks for a password) and empty screens (little or no data).
 // <skill> is the folder that holds SKILL.md.
-// Saves shots at 390 and 1280, the H1, actions, fields, and console errors.
+// Saves full-page shots at 390 and 1280 (capped at 6000px tall), the H1, actions, fields, and console errors.
+// The top 800px (desktop) or 844px (phone) of each shot is the first screen a user sees.
 // Signs in with a demo account when a login form is offered. Skips accounts that say unapproved or denied.
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
@@ -50,6 +51,7 @@ function noteError(text) {
   if (line && !errors.includes(line)) errors.push(line);
 }
 
+const MAX_SHOT_PX = 6000;
 async function snapshot(page, id, signedIn) {
   // Read every screen at desktop width; the phone screenshot below would otherwise leave the next read at 390.
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -77,8 +79,15 @@ async function snapshot(page, id, signedIn) {
   for (const vp of [{ name: 'desktop', width: 1280, height: 800 }, { name: 'phone', width: 390, height: 844 }]) {
     await page.setViewportSize({ width: vp.width, height: vp.height });
     const file = `${id}-${vp.name}.png`;
-    await page.screenshot({ path: join(outDir, file), fullPage: false });
+    // The whole page, not just the first screen: long pages (landing pages, lists) hide most of their
+    // problems below the fold. Capped at 6000px so a 20,000px list does not make a 3 MB image.
+    // The top ${vp.height}px of each image is what a user sees before scrolling.
+    await page.waitForTimeout(150);
+    const full = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0)).catch(() => vp.height);
+    const height = Math.min(full, MAX_SHOT_PX);
+    await page.screenshot({ path: join(outDir, file), fullPage: true, clip: { x: 0, y: 0, width: vp.width, height } }).catch(() => page.screenshot({ path: join(outDir, file) }));
     shot[vp.name] = file;
+    shot[`${vp.name}_page_height`] = full;
   }
   return { id, url: page.url(), route, signed_in: signedIn || !!session, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, asks_password: facts.password, looks_empty: facts.empty, shots: shot, console_errors: errors.slice() };
 }
