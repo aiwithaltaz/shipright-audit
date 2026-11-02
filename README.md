@@ -4,7 +4,7 @@
 
 Built for apps people already shipped with Cursor, Lovable, Claude Code, Replit and friends: they work, but they feel clunky, and nobody can say exactly why.
 
-> **Status: v0.5 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
+> **Status: v0.6 beta.** Measured results are not in yet. The benchmark is built and its pass bars were fixed in advance ([PREREGISTRATION.md](benchmarks/PREREGISTRATION.md)). We publish numbers when the runs are graded, including where it loses.
 
 ## Install
 
@@ -55,10 +55,12 @@ Then the reply, in this order:
 It follows the method expert designers use, one rung at a time:
 
 0. **Start, don't ask:** installs its browser tools outside your app, crawls, and only opens a sign-in window or asks about data when it has to
-1. **Reach every screen** at phone and desktop width (`crawl.mjs`), and flag a login wall or empty screens
+1. **Reach every screen** at phone and desktop width, signed in and signed out (`crawl.mjs`), and flag a login wall or empty screens
+1b. **Open every safe control** (`explore.mjs`): every menu, dialog and pop-over, tooltips on icon buttons, and buttons that do nothing or throw errors. It stops before anything that saves, sends or spends
 2. **Name the core tasks** as user goals
 3. **Pass 1: walk each task** as a first-time user, screenshotting every step at both widths (`walk.mjs`)
 4. **Pass 2: check each screen** against the 10 usability heuristics, layout and hierarchy, work-screen rules and WCAG 2.2 AA basics, with independent reviewers when your tool supports subagents
+4b. **Compare with the category leaders:** what the 3 to 5 apps your users already know do, area by area, and whether each thing lives where users expect it
 5. **Pass 3: visual craft:** pills, counts, too many labels, a buried main action, alignment, spacing, corner shape and layering (`visual.mjs` measures them after each page finishes loading). Every lead it measures must end up as a pain or be rejected with a reason
 5b. **Pass 4: taste:** first impression, focal point, type, color, space, surfaces, icons, the generic template look and polish, scored 1 to 5 with reasons, because "it works but I'm not a fan of the UI" is a finding too
 6. **Name what works** (at least 3 Keeps)

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Notes</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 0; }
+header { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid #ddd; }
+button { padding: 8px 12px; }
+.icon { width: 36px; height: 36px; padding: 0; }
+dialog { border: 1px solid #ccc; padding: 24px; }
+.tip { position: absolute; top: 56px; background: #222; color: #fff; padding: 4px 8px; font-size: 12px; display: none; }
+.has-tip:hover + .tip { display: block; }
+</style></head>
+<body>
+<header>
+  <button aria-haspopup="dialog" id="settings">Settings</button>
+  <button class="icon has-tip" aria-label="Help">?</button><span class="tip" role="tooltip">Help and shortcuts</span>
+  <button class="icon" aria-label="Handoff">&#8635;</button>
+  <button id="bookmark">Bookmark</button>
+  <button id="delete">Delete</button>
+  <button class="icon" aria-label="Use microphone" id="mic">&#9679;</button>
+  <button id="attach">Attach</button><input type="file" id="file" hidden>
+</header>
+<main>
+  <h1>My notes</h1>
+  <p id="state">Three notes saved.</p>
+  <form onsubmit="event.preventDefault(); document.getElementById('state').textContent = 'SENT';"><input aria-label="Message"><button type="submit">Send</button></form>
+</main>
+<dialog id="dlg"><h2>Settings</h2><p>Theme and language.</p></dialog>
+<script>
+document.getElementById('settings').onclick = () => document.getElementById('dlg').showModal();
+document.getElementById('delete').onclick = () => { document.getElementById('state').textContent = 'DELETED'; };
+document.getElementById('mic').onclick = () => fetch('/api/transcribe', { method: 'POST' });
+document.getElementById('attach').onclick = () => document.getElementById('file').click();
+</script>
+</body>
+</html>

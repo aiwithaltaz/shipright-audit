@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0-beta.1 (2026-11-01)
+
+From the Everthread audit: all 18 of its findings were real, but it found only about 5 of the owner's 21 notes. It missed what it never opened (the image dialog, the bookmark dialog, the handoff button), what needed a comparison with ChatGPT, Claude and Perplexity (the model picker far from the message box, no effort control, memory outside Settings), and the sign-in page.
+
+- **New `explore.mjs`: open every safe control.** It hovers icon-only buttons for tooltips, opens every menu, dialog, panel and pop-over, records what opened with a screenshot, and flags buttons that do nothing and clicks that cause console or network errors (a voice button posting to a missing endpoint, for example). It never clicks risky words or form submits, and on a live app it only clicks controls that open something.
+- **New Step 4b and `references/conventions.md`: compare with the category leaders.** Name 3 to 5 apps the users already know, compare area by area in a **Category conventions** table (Matches, a pain, or differs on purpose), and check where things live (main navigation, next to what they change, Settings, panels that match their section, labels on icons). Starter checklists for apps with accounts, AI chat, booking, stores, dashboards, creator tools and landing pages. The AI chat list was written after seeing Everthread, so a fair re-test needs a different app.
+- **Signed out too:** with a session, the crawl also runs signed out, so sign-in and sign-up pages get audited.
+- **The core promise:** the audit may ask once, after the crawl, to do 1 or 2 named actions that test the app's main promise. Default is no.
+- **By hand mode:** `scripts/analyze-page.js` holds the in-page checks that `visual.mjs` runs, so an audit run in a browser tool (an app only your own browser is signed in to) uses the same checks.
+- **Gate:** requires Category conventions (6 rows or more, each with a verdict), "Controls opened" in the header, and a decision for every lead from either script in **Script leads**.
+- **Risky words now include** like, pin, star, share, regenerate, feedback, rename and the rest of the one-click changes.
+
 ## 0.5.0-beta.1 (2026-11-01)
 
 From the SocialGhost audits: 8 of 8 findings were right, but the owner's main complaint ("I'm not a fan of the UI") was never checked, the crawl saw only the first screen of a long landing page, and the audit mixed its files with earlier audits.

@@ -115,6 +115,27 @@ if (hasPw) {
   ok('login.mjs fails cleanly when nobody signs in', failCode === 1 && !existsSync(never), `exit ${failCode}`);
 } else ok('seeded apps match their answer keys', true, 'SKIPPED: Playwright not installed (npm i -D playwright)');
 
+// 14. Explorer: opens safe controls, never risky ones, and reports dead controls, missing tooltips and errors
+if (hasPw) {
+  const eout = mkdtempSync(join(tmpdir(), 'explore-'));
+  run(['skills/shipright-audit/scripts/explore.mjs', 'tests/fixtures/explore-app/index.html', '--out', eout]);
+  const ex = JSON.parse(readFileSync(join(eout, 'explore.json'), 'utf8'));
+  const res = n => (ex.controls.find(c => c.control === n) || {}).result || '';
+  const kinds = ex.leads.map(l => `${l.kind}:${l.what}`).join(' | ');
+  const good = /^opened dialog/.test(res('Settings')) && /not clicked/.test(res('Delete')) && /not clicked/.test(res('Send')) && /file picker/.test(res('Attach'))
+    && /no-tooltip:.*Handoff/.test(kinds) && /dead-control:.*Bookmark/.test(kinds) && /error-on-click:.*microphone.*transcribe/.test(kinds) && !/no-tooltip:.*Help/.test(kinds);
+  ok('explorer opens safe controls and finds dead ones, missing tooltips and errors', good, `${ex.controls.length} controls, ${ex.leads.length} leads`);
+  // On a live app (http), controls whose effect is unknown are listed, not clicked.
+  const live = createServer((req, res2) => { const f = join(root, 'tests/fixtures/explore-app/index.html'); if (req.url !== '/') { res2.writeHead(404); return res2.end(); } res2.writeHead(200, { 'content-type': 'text/html' }); res2.end(readFileSync(f)); });
+  await new Promise(r => live.listen(0, '127.0.0.1', r));
+  const lout = mkdtempSync(join(tmpdir(), 'explore-live-'));
+  await new Promise(r => { const p = spawn(process.execPath, ['skills/shipright-audit/scripts/explore.mjs', `http://127.0.0.1:${live.address().port}/`, '--out', lout], { cwd: root }); p.on('close', r); });
+  live.close();
+  const lx = JSON.parse(readFileSync(join(lout, 'explore.json'), 'utf8'));
+  const lres = n => (lx.controls.find(c => c.control === n) || {}).result || '';
+  ok('explorer on a live app clicks only controls that open something', /could change data/.test(lres('Bookmark')) && /could change data/.test(lres('Handoff')) && /^opened/.test(lres('Settings')), `Bookmark: ${lres('Bookmark')}`);
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);

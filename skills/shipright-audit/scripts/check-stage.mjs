@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Check a pain map against the shipright-audit gate. Every failure names the row and the field to fix.
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
-// When the audit folder holds visual/visual.json, every visual lead must be listed in "## Visual leads"
+// When the audit folder holds visual/visual.json or explore/explore.json, every lead must be listed in "## Script leads"
 // as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
 // a pain may not cite that screen's screenshot.
 //        node <skill>/scripts/check-stage.mjs --self-test
@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const SECTIONS = ['First impression', 'Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
+const SECTIONS = ['First impression', 'Category conventions', 'Screens', 'Task walks', 'Keeps', 'Pains', 'Missing', 'Fix map', 'Themes', 'Not verified', 'Left behind'];
 const CAUSES = ['layout', 'flow', 'copy', 'missing feature', 'data model', 'rules or prerequisites', 'performance', 'trust', 'access'];
 const SEVERITY_WORDS = { blocker: 4, major: 3, minor: 2, polish: 1 };
 
@@ -41,7 +41,7 @@ export function check(md, dir = null) {
 
   if (/<[a-z][^>]*>/i.test(md.replace(/```[\s\S]*?```/g, ''))) errors.push('Template placeholders like <app name> are still in the file. Replace every one.');
   for (const s of SECTIONS) if (!sections[s]) errors.push(`Missing section "## ${s}".`);
-  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
+  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
 
   // Taste pass: a score and a reason for each of T1 to T9, and a short verdict above the table.
   if (sections['First impression']) {
@@ -54,6 +54,20 @@ export function check(md, dir = null) {
     }
     const verdict = sections['First impression'].filter(l => l.trim() && !l.trim().startsWith('|')).join(' ');
     if (verdict.split(/\s+/).filter(Boolean).length < 12) errors.push('First impression: write a 2 or 3 sentence verdict above the table.');
+  }
+
+  const convIds = [];
+  // Category conventions: the app compared with the leaders its users already know.
+  if (sections['Category conventions']) {
+    const cc = table(sections['Category conventions']);
+    if (cc.rows.length < 6) errors.push(`Category conventions: ${cc.rows.length} row(s). Compare at least 6 areas with the category leaders (references/conventions.md).`);
+    cc.rows.forEach((r, i) => {
+      const v = (cell(cc, r, 'verdict') || r[r.length - 1] || '').trim();
+      if (!/^matches\b/i.test(v) && !/\bP\d{2,}\b/.test(v) && !/^differs on purpose\W+\w+/i.test(v)) errors.push(`Category conventions row ${i + 1} ("${r[0]}"): verdict must be Matches, a pain ID, or "Differs on purpose:" with the reason.`);
+      const pid = v.match(/\bP\d{2,}\b/);
+      if (pid) convIds.push(pid[0]);
+    });
+    if (!/leaders compared:/i.test(sections['Category conventions'].join('\n'))) errors.push('Category conventions: name the leaders on a "Leaders compared:" line.');
   }
 
   const screens = table(sections['Screens'] || []);
@@ -89,6 +103,8 @@ export function check(md, dir = null) {
     if (sentences > 2) errors.push(`Pains ${id}: "What happens" has ${sentences} sentences. Describe one problem in one sentence (two at most); split the rest into new rows.`);
   }
 
+  for (const pid of convIds) if (!ids.has(pid)) errors.push(`Category conventions: ${pid} is not in Pains.`);
+
   const missingRows = table(sections['Missing'] || []).rows;
   if (sections['Missing'] && !missingRows.length && !/none found/i.test((sections['Missing'] || []).join('\n'))) errors.push('Missing: no rows. Check the page inventory and list what is missing, or write "None found" with what you checked.');
 
@@ -122,24 +138,27 @@ export function check(md, dir = null) {
 
   if (dir) {
     const find = (d, name, depth = 0) => { if (depth > 3 || !existsSync(d)) return null; for (const n of readdirSync(d)) { const p = join(d, n); if (n === name) return p; if (statSync(p).isDirectory()) { const f = find(p, name, depth + 1); if (f) return f; } } return null; };
-    // Visual leads ledger: no lead the script measured may vanish without a decision.
-    const vj = find(dir, 'visual.json');
-    if (vj) {
-      let leads = [];
-      try { const v = JSON.parse(readFileSync(vj, 'utf8')); leads = (v.leads || v.findings || []).map(l => l.id); } catch {}
-      if (leads.length) {
-        const ledger = table(sections['Visual leads'] || []);
-        if (!sections['Visual leads']) errors.push(`Missing section "## Visual leads". visual.mjs found ${leads.length} lead(s); list each as a pain (P##) or Rejected with the reason.`);
-        else {
-          const rows = new Map(ledger.rows.map(r => [r[0], r]));
-          const missingLeads = leads.filter(id => !rows.has(id));
-          if (missingLeads.length) errors.push(`Visual leads: ${missingLeads.join(', ')} not decided. Add a row for each: the pain ID it became, or "Rejected: <what you saw on the crop>".`);
-          for (const [id, r] of rows) {
-            const decision = cell(ledger, r, 'decision') || r[r.length - 1] || '';
-            const pain = decision.match(/\bP\d{2,}\b/);
-            if (pain && !ids.has(pain[0])) errors.push(`Visual leads ${id}: ${pain[0]} is not in Pains.`);
-            if (!pain && !(/^rejected\b/i.test(decision) && decision.replace(/^rejected\W*/i, '').split(/\s+/).length >= 3)) errors.push(`Visual leads ${id}: decision must be a pain ID, or "Rejected:" with a reason of 3 words or more.`);
-          }
+    // Script leads ledger: no lead a script measured may vanish without a decision.
+    let leads = [];
+    for (const name of ['visual.json', 'explore.json']) {
+      const f = find(dir, name);
+      if (!f) continue;
+      try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || v.findings || []).map(l => l.id)); } catch {}
+    }
+    leads = [...new Set(leads)];
+    if (leads.length) {
+      const heading = sections['Script leads'] ? 'Script leads' : (sections['Visual leads'] ? 'Visual leads' : null);
+      if (!heading) errors.push(`Missing section "## Script leads". The scripts found ${leads.length} lead(s); list each as a pain (P##) or Rejected with the reason.`);
+      else {
+        const ledger = table(sections[heading]);
+        const rows = new Map(ledger.rows.map(r => [r[0], r]));
+        const missingLeads = leads.filter(id => !rows.has(id));
+        if (missingLeads.length) errors.push(`Script leads: ${missingLeads.join(', ')} not decided. Add a row for each: the pain ID it became, or "Rejected: <what you saw>".`);
+        for (const [id, r] of rows) {
+          const decision = cell(ledger, r, 'decision') || r[r.length - 1] || '';
+          const pain = decision.match(/\bP\d{2,}\b/);
+          if (pain && !ids.has(pain[0])) errors.push(`Script leads ${id}: ${pain[0]} is not in Pains.`);
+          if (!pain && !(/^rejected\b/i.test(decision) && decision.replace(/^rejected\W*/i, '').split(/\s+/).length >= 3)) errors.push(`Script leads ${id}: decision must be a pain ID, or "Rejected:" with a reason of 3 words or more.`);
         }
       }
     }
@@ -164,7 +183,7 @@ export function check(md, dir = null) {
 
 function selfTest() {
   const good = `# Pain map: Demo
-Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Reviewers: 1 · Method: crawl
+Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Controls opened: 12 of 14 · Reviewers: 1 · Method: crawl
 Scope: booking
 Out of scope: admin
 Context used: none given
@@ -182,6 +201,17 @@ It reads as a calm booking tool, but four equal stat cards compete with the book
 | T7 Area | 3 | fine but plain here |
 | T8 Area | 3 | fine but plain here |
 | T9 Area | 3 | fine but plain here |
+
+## Category conventions
+Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
+| Area | What the leaders do | This app | Verdict |
+|---|---|---|---|
+| Sign in | Google sign-in | Email only | P02 |
+| First step | Pick a time first | Pick a time first | Matches |
+| Price | Shown before booking | Shown before booking | Matches |
+| Cancel | Link in email | Link in email | Matches |
+| Reminders | Text and email | Email | Differs on purpose: owner's clients prefer email |
+| Search | Search by service | Search by service | Matches |
 
 ## Screens
 | Screen | Job | Primary action | Actions | States seen | Screenshot |
@@ -240,6 +270,9 @@ It reads as a calm booking tool, but four equal stat cards compete with the book
     .replace('- Nothing: no test data was created', '')
     .replace('| T9 Area | 3 | fine but plain here |', '')
     .replace('| T8 Area | 3 | fine but plain here |', '| T8 Area | 7 | x |')
+    .replace('Controls opened: 12 of 14 · ', '')
+    .replace('| Reminders | Text and email | Email | Differs on purpose: owner\'s clients prefer email |', '| Reminders | Text and email | Email | Different |')
+    .replace('| Search | Search by service | Search by service | Matches |', '')
     .replace('It reads as a calm booking tool, but four equal stat cards compete with the booking button. One clear focal point would help most.', '');
   // Folder checks: an undecided visual lead, a lead pointing at a missing pain, a vague rejection,
   // and a pain that cites a screenshot the crawl saved mid-load.
@@ -248,7 +281,7 @@ It reads as a calm booking tool, but four equal stat cards compete with the book
   for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png', 'screens/s05-desktop.png']) writeFileSync(join(d, f), '');
   writeFileSync(join(d, 'visual/visual.json'), JSON.stringify({ leads: [{ id: 'V01' }, { id: 'V02' }, { id: 'V03' }, { id: 'V04' }] }));
   writeFileSync(join(d, 'screens/crawl.json'), JSON.stringify({ unsettled: ['s05'] }));
-  const ledger = '\n## Visual leads\n| Lead | Check | Decision |\n|---|---|---|\n| V01 | pill | P01 |\n| V02 | gap | Rejected: the gap holds a chart that loads later |\n| V03 | menu | P09 |\n';
+  const ledger = '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| V01 | pill | P01 |\n| V02 | gap | Rejected: the gap holds a chart that loads later |\n| V03 | menu | P09 |\n';
   const withDir = check(good.replace('Book step 4, screens/book-1280.png', 'Book step 4, screens/s05-desktop.png') + ledger.replace('| V02 | gap | Rejected: the gap holds a chart that loads later |', '| V02 | gap | Rejected: fine |'), d);
   const dirExpect = ['V04 not decided', 'P09 is not in Pains', 'V02: decision must be', 's05 was still loading'];
   const dirMissed = dirExpect.filter(e => !withDir.some(x => x.includes(e)));
@@ -256,7 +289,7 @@ It reads as a calm booking tool, but four equal stat cards compete with the book
   console.log(dirMissed.length === 0 ? `PASS  folder checks caught all ${dirExpect.length} problems` : `FAIL  folder checks missed: ${dirMissed.join(', ')}`);
   console.log(dirGood.length === 0 ? 'PASS  a complete ledger passes' : `FAIL  complete ledger: ${dirGood.join(' | ')}`);
   const g = check(good), b = check(bad);
-  const expect = ['row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
+  const expect = ['Controls opened:', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);

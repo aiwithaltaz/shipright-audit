@@ -1,6 +1,6 @@
 # Pain map: <app name>
 
-Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Reviewers: <n> · Method: <crawl / by hand / screenshots> · Widths seen: <390, 1280, or the width you actually saw> · Data: <realistic / sparse / empty>
+Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Controls opened: <n of m> · Reviewers: <n> · Method: <crawl / by hand / screenshots> · Widths seen: <390, 1280, or the width you actually saw> · Data: <realistic / sparse / empty>
 Scope: <the core tasks audited>
 Out of scope: <what was not audited>
 Context used: <users, business goal, analytics, owner complaints: or "none given">
@@ -41,9 +41,16 @@ Context used: <users, business goal, analytics, owner complaints: or "none given
 | ID | What happens | Where (screens + screenshot) | Who | Heuristic or lens | Severity (1-4) | Cause | Source |
 |---|---|---|---|---|---|---|---|
 
-## Visual leads
+## Category conventions
 
-One row per lead in `visual/visual.md`. Decision: the pain ID it became, or "Rejected: <what you saw on the crop>". Delete this section only if visual.mjs did not run.
+Leaders compared: <3 to 5 apps, and why>
+
+| Area | What the leaders do | This app | Verdict |
+|---|---|---|---|
+
+## Script leads
+
+One row per lead in `visual/visual.md` (V##) and `explore/explore.md` (E##). Decision: the pain ID it became, or "Rejected: <what you saw>".
 
 | Lead | Check | Decision |
 |---|---|---|

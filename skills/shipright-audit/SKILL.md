@@ -21,10 +21,12 @@ Copy this into your working notes and tick each line as you finish it. Do not st
 ```
 Audit progress:
 - [ ] 0. Started: one line to the owner, tools ready, door checked
-- [ ] 1. Every screen reached
+- [ ] 1. Every screen reached, signed in and signed out
+- [ ] 1b. Every safe control opened
 - [ ] 2. Core tasks named
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
+- [ ] 4b. Category leaders compared, information architecture checked
 - [ ] 5. Pass 3: visual craft checked
 - [ ] 5b. Pass 4: taste checked, First impression filled
 - [ ] 6. Keeps named
@@ -57,6 +59,7 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported.
+6. **The core promise.** If the app's main promise can only be checked by doing the thing (send a message, run an automation, place a test booking), ask once, after the crawl: "May I do <1 or 2 named actions> to check <the promise>? They will show in your account, and I'll list them." Default is no. On yes, mark those steps `"owner_said_yes": true` and list them in Left behind.
 
 If the owner gives instructions at any point (what to skip, what is allowed), follow them and say which reading you took.
 
@@ -70,9 +73,20 @@ If the owner gives instructions at any point (what to skip, what is allowed), fo
 - Every script waits for each page to settle (no spinners, numbers stop changing) before reading it. `crawl.md` marks a screen that never settled as **may be mid-load**: do not cite its counts or empty messages as real.
 - If Playwright's own browser will not start, every script falls back to the installed Microsoft Edge, then Google Chrome, then Playwright's WebKit. To force one, set `SHIPRIGHT_BROWSER=msedge` (or `chrome`, `webkit`).
 - `crawl.md` flags a **login wall**, **mostly empty** screens, and **label drift** (links that go to the same place under different words).
-- If Playwright cannot be used, visit each screen by hand. Your own browser may be narrow: record the width you actually saw, and put any width you did not see in Not verified.
+- **Signed out too.** When you have a session, also crawl once without it, so the sign-in, sign-up and reset pages get audited. Owners judge those first.
+- **By hand when the scripts cannot reach the site** (for example an app only the owner's own browser is signed in to): use a browser tool, visit each screen at 1280 and 390 and save each screenshot into `<audit>/screens/`. Paste `<skill>/scripts/analyze-page.js` into the tool's JavaScript runner followed by `JSON.stringify(SHIPRIGHT_ANALYZE())` on each main page: it runs the same checks as `visual.mjs`. Do Step 1b by hand with the same rules. Say in the header that the audit ran by hand.
+- If no browser can be used at all, visit what you can, record the width you actually saw, and put any width you did not see in Not verified.
 
 Done when you can list every screen in scope.
+
+## Step 1b: Open every safe control
+
+Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --crawl <audit>/screens/crawl.json [--session ...] --out <audit>/explore`.
+
+- It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
+- Read `explore.md`. Open the **not clicked** controls yourself when the name makes the effect clear and it cannot save, send or spend: a dialog that asks before it saves is safe to open and close. Look inside everything that opened: the confusing part is often the panel, not the button.
+- Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
+- Put the totals in the header: "Controls opened: N of M".
 
 ## Step 2: Name the core tasks
 
@@ -97,12 +111,21 @@ Read `references/heuristics.md` and check every screen in scope against the 10 u
 
 **Independent reviewers.** If your tool can start subagents, run 2 or 3 reviewers with the same brief, screens and references, and never let one see another's notes. Merge their lists and record how many found each pain. If you cannot, write "Reviewers: 1" in the header.
 
+## Step 4b: Compare with the category leaders, and check where things live
+
+Owners judge their app against the apps their users already know, and users expect it to work the same way. Read `references/conventions.md`.
+
+1. Name the category and 3 to 5 leaders. Search the web or open their sites when you can, and cite what you saw. Otherwise mark claims "from knowledge, not checked today".
+2. Fill the pain map's **Category conventions** table, at least 6 rows: what the leaders do, what this app does, and a verdict (Matches, a pain ID, or "Differs on purpose:" with the reason).
+3. Run the "where does it belong" checks (IA1 to IA6) on the navigation, the panels and Settings. Pains use the lens "Conventions: C1" or "IA: IA#".
+4. Features every leader has and this app lacks go in Missing.
+
 ## Step 5: Pass 3, visual craft
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
 1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [--session ...] --out <audit>/visual`. It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, and counts with nothing behind them. It opens menus but never clicks risky words. The same problem on several pages is one lead.
-2. Open `visual.md` and each crop. **Decide every lead** in the pain map's **Visual leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
+2. Open `visual.md`, `explore.md` and each crop. **Decide every lead** (V## and E##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
 3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
 4. Cite the crop or the full screenshot as evidence.
 
@@ -167,7 +190,9 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
-- [ ] Every visual lead is decided in Visual leads: a pain ID, or Rejected with a reason.
+- [ ] Every script lead (visual and explore) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] Category conventions has at least 6 rows, each with a verdict.
+- [ ] The header says how many controls were opened.
 - [ ] First impression has a score and a reason for T1 to T9, and a verdict.
 - [ ] No pain rests on a screenshot the crawl saved mid-load, unless loading is the pain.
 - [ ] No duplicate pains, and one problem per row.

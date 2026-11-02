@@ -84,4 +84,5 @@ export function normUrl(u) {
 }
 
 // Words on buttons a guest in a live app must not click without the owner's yes.
-export const DANGER = /delete|remove|publish|\bpost\b|post now|send|\bpay|sign ?out|log ?out|archive|connect|generate|schedule|invite|save|submit|approve|purchase|\bbuy\b|upgrade|cancel (plan|subscription)/i;
+// Also words that change data with one click: likes, pins, stars, feedback, regenerate, share.
+export const DANGER = /delete|remove|publish|\bpost\b|post now|send|\bpay|sign ?out|log ?out|archive|connect|generate|schedule|invite|save|submit|approve|purchase|\bbuy\b|upgrade|cancel (plan|subscription)|regenerate|retry|resend|\blike\b|dislike|thumb|feedback|\bvote|\bpin\b|unpin|\bstar\b|favou?rite|follow|subscribe|\bshare\b|duplicate|rename|\bfork\b|branch|record|dismiss|accept|decline/i;

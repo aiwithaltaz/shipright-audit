@@ -62,7 +62,7 @@ A list exists to be scanned. Ask: what is the one thing the user looks for in ea
 
 ## Judging visual leads from visual.mjs
 
-- **Decide every lead.** Each one gets a row in Visual leads: the pain it became, or "Rejected:" and what you saw. A lead dropped silently is how an audit misses what the owner spots in a second.
+- **Decide every lead.** Each one gets a row in Script leads: the pain it became, or "Rejected:" and what you saw. A lead dropped silently is how an audit misses what the owner spots in a second.
 - **Confirm on the crop.** Reject a lead when the difference is intended (a featured card) or invisible at normal size, and say which.
 - **Several leads, one pain.** Misaligned dates and a big gap in the same cards can be one pain ("Card footers float"), but each lead still gets its row pointing to it.
 - **Cite the crop** as the evidence for the pain.
