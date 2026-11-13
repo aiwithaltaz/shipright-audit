@@ -9,6 +9,11 @@
 // widths it explores the controls that only exist there (a phone menu button, a bottom bar) and opens
 // again whatever opened a dialog, menu or panel, so each one is also seen and screenshotted on phone.
 // Text that is cut off inside an opened dialog, menu or panel is reported as a lead.
+// It also checks motion, at the first width:
+//   - Layout shift on open: a menu or dialog should open over the page. If the page behind it jumps
+//     (layout shift over 0.1), that is a lead.
+//   - Reduced motion: once per page it switches the browser to "reduce motion", loads the page again
+//     and opens one menu. Anything that still slides, zooms or spins without need is a lead.
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -227,7 +232,7 @@ try {
         return out;
       }, [DANGER.source, OPENER.source, allow, remote, CONTROLS]);
 
-      let clicked = 0;
+      let clicked = 0, motionOpener = null;
       for (const c of controls) {
         const key = `${c.name}|${c.iconOnly}`;
         if (seenHere.has(key)) continue; // the same control on another page was already explored at this width
@@ -258,6 +263,7 @@ try {
         clicked++;
         const before = await page.evaluate(STATE);
         errs = []; picker = false;
+        await page.evaluate(() => { window.__srShiftFrom = performance.now(); }).catch(() => {});
         const ok = await page.click(sel, { timeout: 3000 }).then(() => true).catch(() => false);
         if (!ok) { row.result = 'could not click (covered or moved)'; rows.push(row); continue; }
         await settle(page, { timeout: 3000 });
@@ -273,10 +279,16 @@ try {
           row.shot = `E${String(++shotN).padStart(3, '0')}-${routeId}-${c.name.replace(/[^a-z0-9]+/gi, '-').slice(0, 24)}${firstWidth ? '' : `-${width}`}.png`;
           await page.screenshot({ path: join(outDir, row.shot) }).catch(() => { row.shot = null; });
         }
-        // Look inside what opened: is any of its text cut off at this width?
+        // Look inside what opened: is any of its text cut off at this width? And did the page behind a
+        // menu or dialog jump when it opened? (An accordion or a tab is meant to move the page.)
         if (newOpen.length && !picker) {
-          const inside = await page.evaluate(analyzeScript({ within: LAYERS, only: ['clipped-text'] })).catch(() => ({ findings: [] }));
-          for (const f of inside.findings) lead('clipped-text', `Inside "${c.name}": ${f.what}`, url, width, row.shot, { group: `${c.name}|${f.group}`, detail: f.detail });
+          const overlay = newOpen.some(o => /^(dialog|alertdialog|menu|listbox):/.test(o));
+          const inside = await page.evaluate(analyzeScript({ within: LAYERS, only: ['clipped-text', 'layout-shift'], shiftWithInput: true })).catch(() => ({ findings: [] }));
+          for (const f of inside.findings) {
+            if (f.kind === 'clipped-text') lead('clipped-text', `Inside "${c.name}": ${f.what}`, url, width, row.shot, { group: `${c.name}|${f.group}`, detail: f.detail });
+            else if (overlay && firstWidth) lead('layout-shift', `Opening "${c.name}" makes the page behind it jump: layout shift ${f.detail.total.toFixed(2)} (over 0.1 is easy to notice). What moved most: ${f.detail.moved}`, url, width, row.shot, { group: `open|${c.name}`, detail: f.detail });
+          }
+          if (firstWidth && !motionOpener) motionOpener = c;
         }
         // With the owner's yes: flip the switches inside what just opened, and turn each one back.
         if (USE && firstWidth && newOpen.length && !picker) {
@@ -304,6 +316,27 @@ try {
       }
       // With the owner's yes: the switches that sit on the page itself.
       if (USE && firstWidth) await flipToggles({ url, width, routeId, opener: null, reopen: null });
+      // Reduced motion, once per page: ask for less motion, load the page again, and open one menu.
+      if (firstWidth) {
+        await page.emulateMedia({ reducedMotion: 'reduce' }).catch(() => {});
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+        await settle(page, { timeout: 6000 });
+        const still = await page.evaluate(analyzeScript({ only: ['reduced-motion'] })).catch(() => ({ findings: [] }));
+        for (const f of still.findings) lead('reduced-motion', f.what, url, width, null, { group: f.group, detail: f.detail });
+        if (motionOpener) {
+          await markControls();
+          if (await page.click(`[data-sre="${motionOpener.i}"]`, { timeout: 3000 }).then(() => true).catch(() => false)) {
+            await page.waitForTimeout(60);
+            const opening = await page.evaluate(analyzeScript({ only: ['reduced-motion'] })).catch(() => ({ findings: [] }));
+            const shot = opening.findings.length ? `E${String(++shotN).padStart(3, '0')}-${routeId}-reduced-motion.png` : null;
+            if (shot) await page.screenshot({ path: join(outDir, shot) }).catch(() => {});
+            for (const f of opening.findings) lead('reduced-motion', `After opening "${motionOpener.name}": ${f.what}`, url, width, shot, { group: f.group, detail: f.detail });
+            await page.keyboard.press('Escape').catch(() => {});
+          }
+        }
+        await page.emulateMedia({ reducedMotion: null }).catch(() => {});
+      }
     }
   }
 } finally {

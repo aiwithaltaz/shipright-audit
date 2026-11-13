@@ -154,9 +154,11 @@ Owners judge their app against the apps their users already know, and users expe
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
 1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
-2. Open `visual.md`, `explore.md`, `samples.md` and each crop. **Decide every lead** (V##, E## and R##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
-3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
-4. Cite the crop or the full screenshot as evidence.
+2. **Design-system drift.** Execute `node <skill>/scripts/consistency.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/consistency`. On every screen, signed in, it measures search inputs, text inputs, dropdowns, primary buttons, cards, list rows and side panels, and compares corner radius, background, border, height and font size across screens. When most screens share one look and one screen differs, that is a **component drift** lead (C##) with a crop of the usual look and of the odd one out. Its inventory table is a signal for the taste pass.
+3. **Motion.** `visual.mjs` reports a page that **jumps after it has loaded** (layout shift over 0.1: a banner that arrives late, an image with no size). `explore.mjs` reports a menu or dialog that makes the page behind it jump when it opens, and, with the browser set to **reduce motion**, anything that still slides, zooms or spins without need.
+4. Open `visual.md`, `explore.md`, `samples.md`, `consistency.md` and each crop. **Decide every lead** (V##, E##, R## and C##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
+5. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
+6. Cite the crop or the full screenshot as evidence.
 
 ## Step 5b: Pass 4, taste
 
@@ -233,7 +235,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
-- [ ] Every script lead (visual V##, explore E##, existing results R##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] Every script lead (visual V##, explore E##, existing results R##, design-system drift C##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
 - [ ] The header says "Used as a user: yes (N actions)" or "no". On yes, Left behind lists every action. On no, Not verified says "How features behave when used (switches, sending, results)".
 - [ ] Category conventions has at least 10 rows, each with a Kind, a Source and a verdict. At least 3 rows are "How it works". With a web tool, at least half the rows have a linked Source with the date checked, and the header says "Competitor research: live, checked <date>".
 - [ ] Missing has the part "What leaders have that this app doesn't", with the leaders named and linked, or "None found".

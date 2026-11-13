@@ -3,7 +3,8 @@
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
 // When the audit folder holds owner-rules.md, the pain map needs "## Owner decisions respected", and every
 // owner quote in it (and in an "Owner rule:" lens) must stand word for word in owner-rules.md.
-// When the audit folder holds visual/visual.json, explore/explore.json or samples/samples.json, every lead must be listed in "## Script leads"
+// When the audit folder holds visual/visual.json, explore/explore.json, samples/samples.json,
+// consistency/consistency.json or a walk.json with result leads, every lead must be listed in "## Script leads"
 // as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
 // a pain may not cite that screen's screenshot.
 //        node <skill>/scripts/check-stage.mjs --self-test
@@ -210,7 +211,7 @@ export function check(md, dir = null) {
     // Script leads ledger: no lead a script measured may vanish without a decision.
     let leads = [];
     const findAll = (d, name, depth = 0) => { if (depth > 4 || !existsSync(d)) return []; return readdirSync(d).flatMap(n => { const p = join(d, n); return n === name ? [p] : (statSync(p).isDirectory() ? findAll(p, name, depth + 1) : []); }); };
-    for (const name of ['visual.json', 'explore.json', 'samples.json']) {
+    for (const name of ['visual.json', 'explore.json', 'samples.json', 'consistency.json']) {
       const f = find(dir, name);
       if (!f) continue;
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || v.findings || []).map(l => l.id)); } catch {}

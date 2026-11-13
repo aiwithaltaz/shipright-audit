@@ -46,6 +46,7 @@ const bad = md.filter(p => /—|\bgenuinely\b|\bhonestly\b|\bstraightforward\b/i
 ok('style scan (no em dashes or banned words)', bad.length === 0, bad.join(', ') || `${md.length} files`);
 
 // 5. Seeded apps still contain every planted pain and Keep (needs Playwright)
+let busy = { leads: [], findings: [] };
 let hasPw = false;
 try { createRequire(join(root, 'package.json'))('playwright'); hasPw = true; } catch {}
 if (hasPw) {
@@ -74,7 +75,7 @@ if (hasPw) {
   ok(`visual checker finds all ${want.length} planted kinds after a slow load`, lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
-  const busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
+  busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
   const noise = busy.findings.filter(f => f.width === 1280).length;
   ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
   // At 390 the only lead is the one the answer key lists for this app: tables wider than a phone screen.
@@ -181,7 +182,7 @@ if (hasPw) {
     ['walk', [S + 'walk.mjs', app.url, join(dir, 'plan.json'), '--profile', prof, '--out', join(dir, 'w')]],
   ];
   const bad = [];
-  for (const [n, a] of others) { const r2 = await spawnNode(a); if ((r2.code !== 0 && !(n === 'consistency' && r2.code === 1)) || !/signed in with the sign-in profile/.test(r2.err)) bad.push(`${n}: exit ${r2.code} ${r2.err.trim().split('\n').pop()}`); }
+  for (const [n, a] of others) { const r2 = await spawnNode(a); if (r2.code !== 0 || !/signed in with the sign-in profile/.test(r2.err)) bad.push(`${n}: exit ${r2.code} ${r2.err.trim().split('\n').pop()}`); }
   ok('explore, visual, consistency and walk all stay signed in with --profile', bad.length === 0, bad.join(' | ') || `${others.length} scripts, ${app.stats.refresh_ok} token swaps`);
   // The session file was saved at sign-in. The app has swapped its token many times since: it must fail, loudly.
   const c2 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--out', join(dir, 'c2')]);
@@ -283,6 +284,44 @@ if (hasPw) {
     await b.close();
     ok('owner-rules fixture breaks the spacing rule and keeps the greeting', m.gap === 28 && m.greeting === 'Back again? Fine.', `gap ${m.gap}px, greeting "${m.greeting}"`);
   }
+}
+
+// 19. Design-system drift, layout shift and reduced motion.
+if (hasPw) {
+  const S7 = 'skills/shipright-audit/scripts/';
+  const leadsOf = (dir, file) => JSON.parse(readFileSync(join(dir, file), 'utf8')).leads;
+  // Two pages, one search box with a different radius and background: exactly one component-drift lead.
+  const kd = mkdtempSync(join(tmpdir(), 'drift-'));
+  run([S7 + 'consistency.mjs', 'tests/fixtures/drift-app/index.html', '--routes', '#/library', '--out', kd]);
+  const drift = leadsOf(kd, 'consistency.json');
+  ok('component drift: one odd search box on a 2-page app is exactly one lead', drift.length === 1 && drift[0].id === 'C01' && drift[0].kind === 'component-drift' && drift[0].component === 'search input' && drift[0].detail.odd[0].differs_in.join() === 'radius,background' && drift[0].pages.join() === '/index.html#/library' && drift[0].shots.length === 2 && drift[0].shots.every(f => existsSync(join(kd, f))), drift.map(l => `${l.component}: ${l.detail.odd.map(o => o.differs_in.join('+')).join('; ')}`).join(' | ') || 'no lead');
+  // A banner that arrives after the page loaded: a layout-shift lead. A menu that still slides in with
+  // "reduce motion" on: a reduced-motion lead.
+  const sv = mkdtempSync(join(tmpdir(), 'shift-v-')), se = mkdtempSync(join(tmpdir(), 'shift-e-'));
+  run([S7 + 'visual.mjs', 'tests/fixtures/shift-app/index.html', '--out', sv]);
+  run([S7 + 'explore.mjs', 'tests/fixtures/shift-app/index.html', '--out', se]);
+  const shiftLead = leadsOf(sv, 'visual.json').filter(l => l.kind === 'layout-shift');
+  ok('layout shift: a banner inserted after load is a lead', shiftLead.length === 1 && shiftLead[0].detail.total > 0.1 && /jumps after it has loaded/.test(shiftLead[0].what), shiftLead.map(l => l.what.slice(0, 80)).join(' | ') || 'no lead');
+  const motionLead = leadsOf(se, 'explore.json').filter(l => l.kind === 'reduced-motion');
+  ok('reduced motion: a menu that still slides in is a lead', motionLead.length === 1 && /After opening "Menu"/.test(motionLead[0].what) && /transform/.test(motionLead[0].what), motionLead.map(l => l.what.slice(0, 90)).join(' | ') || 'no lead');
+  // No false alarms from the new checks on the fixtures that were not built for them, or on a busy app.
+  const loud = [];
+  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded'];
+  for (const f of ['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app']) {
+    const o1 = mkdtempSync(join(tmpdir(), 'fa-v-')), o2 = mkdtempSync(join(tmpdir(), 'fa-e-')), o3 = mkdtempSync(join(tmpdir(), 'fa-k-'));
+    run([S7 + 'visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o1]);
+    run([S7 + 'explore.mjs', `tests/fixtures/${f}/index.html`, '--out', o2]);
+    if (f !== 'drift-app') run([S7 + 'consistency.mjs', `tests/fixtures/${f}/index.html`, '--out', o3]);
+    const got = [...leadsOf(o1, 'visual.json'), ...leadsOf(o2, 'explore.json'), ...(f !== 'drift-app' ? leadsOf(o3, 'consistency.json') : [])].filter(l => NEW.includes(l.kind));
+    if (got.length) loud.push(`${f}: ${got.map(l => l.kind).join(', ')}`);
+  }
+  const bk = mkdtempSync(join(tmpdir(), 'fa-busy-'));
+  run([S7 + 'consistency.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', bk]);
+  const busyDrift = leadsOf(bk, 'consistency.json');
+  if (busyDrift.length) loud.push(`busy app: ${busyDrift.map(l => l.component).join(', ')}`);
+  const busyNew = busy.leads.filter(l => NEW.includes(l.kind));
+  if (busyNew.length) loud.push(`busy app (visual): ${busyNew.map(l => l.kind).join(', ')}`);
+  ok('drift, layout shift and reduced motion: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
 }
 
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)

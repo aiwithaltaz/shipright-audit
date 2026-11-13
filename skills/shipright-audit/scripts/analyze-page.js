@@ -11,6 +11,14 @@
 //   only    a list of lead kinds to keep, for example ['clipped-text']
 //   results true on a page that shows a result (a past chat, a file, a reply to a test message): also
 //           counts action buttons that have no name at all
+//   shiftWithInput  true to count layout shifts that follow a click too (the scripts use it to see
+//           whether opening a menu makes the page behind it jump)
+// Layout shift: it sums how far things moved from the moment the page finished loading until now (or
+// since window.__srShiftFrom, a performance.now() time you can set). The first render does not count
+// (anything up to 300ms after the load event): only jumps a person sees after the page looked ready.
+// Run it after the page has settled. Over 0.1 is a lead.
+// Reduced motion: switch the browser to "reduce motion" (in DevTools: Rendering, Emulate CSS media
+// feature prefers-reduced-motion), reload, open a menu and run it at once. Anything still moving is a lead.
 var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const ALIGN_PX = 6, GAP_MIN = 40, GAP_RATIO = 2.5, PILL_WORDS = 4, PILL_CHARS = 30, PILLS_PER_CARD = 4;
   // A card's only worded action is buried when 10+ lines of text sit between the title and it.
@@ -269,6 +277,53 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
     if (nameless.length) add({ kind: 'unnamed-action', group: 'unnamed-action', what: `${nameless.length} action button${nameless.length === 1 ? ' has' : 's have'} no name: no words, no label for screen readers and no tooltip text`, detail: { count: nameless.length } }, nameless[0].parentElement || nameless[0]);
   }
 
+  const describe = el => { if (!el || !el.tagName) return 'the page'; const t = text(el).slice(0, 50); const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/)[0] : ''; return `${el.tagName.toLowerCase()}${cls}${t ? ` "${t}"` : ''}`; };
+
+  // Layout shift: content that jumps after it was first shown (a banner that arrives late, an image
+  // with no size, a font swap). The browser reports each jump; over 0.1 in total is easy to notice.
+  const shift = { total: 0, count: 0 };
+  try {
+    if (typeof PerformanceObserver !== 'undefined' && (PerformanceObserver.supportedEntryTypes || []).includes('layout-shift')) {
+      const S = (window.__srShift = window.__srShift || { log: [], po: null });
+      if (!S.po) { S.po = new PerformanceObserver(l => S.log.push(...l.getEntries())); S.po.observe({ type: 'layout-shift', buffered: true }); }
+      S.log.push(...S.po.takeRecords());
+      const nav = (performance.getEntriesByType('navigation') || [])[0];
+      // 300ms of grace after the load event: many apps draw their first screen right at load, and
+      // that first draw is not a jump anyone sees.
+      const from = Math.max(window.__srShiftFrom || 0, nav ? (nav.loadEventStart || nav.domContentLoadedEventEnd || 0) + 300 : 0);
+      const mine = S.log.filter(e => e.startTime >= from && (opts.shiftWithInput || !e.hadRecentInput));
+      shift.count = mine.length;
+      shift.total = Math.round(mine.reduce((a, e) => a + e.value, 0) * 1000) / 1000;
+      if (shift.total > 0.1) {
+        const worst = mine.slice().sort((a, b) => b.value - a.value)[0];
+        const node = ((worst.sources || []).map(x => x.node).filter(n => n && n.nodeType === 1 && n.isConnected).sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0]) || null;
+        add({ kind: 'layout-shift', group: 'layout-shift', what: `The page jumps after it has loaded: layout shift ${shift.total.toFixed(2)} (over 0.1 is easy to notice). What moved most: ${describe(node)}`, detail: { total: shift.total, shifts: shift.count, moved: describe(node) } }, node && node !== document.body ? node : null);
+      }
+    }
+  } catch (e) {}
+
+  // Reduced motion: people who ask their device for less motion should not get things sliding and
+  // zooming. Only checked when the page is in "reduce motion" mode. Fades are fine; spinners and
+  // progress bars are essential. Anything else that still moves is a lead.
+  const motion = { reduced: false, moving: [] };
+  try {
+    motion.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const MOVES = /transform|translate|scale|rotate|^(top|left|right|bottom|inset|width|height|max-?height|max-?width|margin|padding)/i;
+    for (const a of document.getAnimations()) {
+      if (a.playState !== 'running' || !a.effect || !a.effect.target) continue;
+      const el = a.effect.target, timing = a.effect.getTiming();
+      if (Number(timing.duration) < 50 || !vis(el)) continue;
+      if (el.closest('[role=progressbar], [aria-busy="true"], [class*=spinner i], [class*=loading i], [class*=loader i], [class*=skeleton i], [class*=progress i]')) continue;
+      const props = [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k)))].filter(k => MOVES.test(k));
+      if (props.length) motion.moving.push({ el, what: describe(el), props, ms: Math.round(Number(timing.duration)), forever: timing.iterations === Infinity });
+    }
+    if (motion.reduced && motion.moving.length) {
+      const m = motion.moving[0];
+      add({ kind: 'reduced-motion', group: 'reduced-motion|' + sig(m.el), what: `With "reduce motion" on, ${motion.moving.length === 1 ? 'something still moves' : `${motion.moving.length} things still move`}: ${m.what} animates ${m.props.join(', ')} ${m.forever ? 'without end' : `for ${m.ms}ms`}`, detail: { moving: motion.moving.slice(0, 5).map(x => ({ what: x.what, props: x.props, ms: x.ms, forever: x.forever })) } }, m.el);
+    }
+    motion.moving = motion.moving.map(x => ({ what: x.what, props: x.props, ms: x.ms, forever: x.forever }));
+  } catch (e) {}
+
   // Corner scale: what radius do cards and buttons use?
   const rounded = [...groups.flatMap(g => g.items), ...document.querySelectorAll('button, input, select, textarea, [role=button]')]
     .filter(vis).map(el => ({ el, r: radius(el), h: el.getBoundingClientRect().height })).filter(x => x.r < x.h / 2 - 1);
@@ -310,5 +365,5 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const main = document.querySelector('main') || document.body;
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
   const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
-  return { findings: kept, medianRadius, scale, counts, empty, style, title: document.title, width: document.documentElement.clientWidth };
+  return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, title: document.title, width: document.documentElement.clientWidth };
 };

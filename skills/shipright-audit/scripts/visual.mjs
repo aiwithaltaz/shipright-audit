@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Measure visual craft the eye misses or argues about: alignment and spacing inside repeated cards,
-// sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, text that is cut off, and counts that
-// promise items a page does not have. Every finding gets a cropped screenshot.
+// sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, text that is cut off, media that never loaded,
+// a page that jumps while it loads (layout shift over 0.1), and counts that promise items a page does not have.
+// Every finding gets a cropped screenshot when there is something to crop.
 // Usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes "#/,#/library"] [--crawl crawl.json]
 //        [--widths 1280,390] [--profile dir] [--session session.json] [--out dir] [--no-click]
 // --routes   extra pages to check (hash routes, paths or URLs), in addition to the start page
@@ -87,13 +88,18 @@ const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes
 const pages = [];
 const findings = [];
 let n = 0;
+const samePage = (a, b) => { try { const x = new URL(a), y = new URL(b); return x.origin + x.pathname + x.search === y.origin + y.pathname + y.search; } catch { return false; } };
 try {
   for (const width of widths) {
     await page.setViewportSize(viewportFor(width));
     const suffix = width === widths[0] ? '' : `-${width}`;
     for (const url of urls) {
       const routeId = (new URL(url).hash || new URL(url).pathname).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 40) || 'home';
+      const sameDocument = samePage(page.url(), url);
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+      // A hash route change swaps the page in place: everything moves, and it is not a load. Load the
+      // route fresh, so layout shift measures what a person opening this page sees.
+      if (sameDocument) await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       const settled = await settle(page);
       await page.evaluate(() => scrollTo(0, 0)).catch(() => {}); // a crop on the last page may have scrolled this one
       const a = await page.evaluate(analyzeScript());
@@ -147,8 +153,15 @@ try {
 
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
 const leads = mergeLeads(findings, widths, local);
+// Layout shift on several pages is one lead: say how many pages, and which one jumps most.
+for (const l of leads.filter(x => x.kind === 'layout-shift')) {
+  const all = findings.filter(f => f.kind === 'layout-shift').sort((a, b) => b.detail.total - a.detail.total);
+  if (l.pages.length > 1) l.what = `The page jumps after it has loaded on ${l.pages.length} pages. Worst: ${local(all[0].page)} at ${all[0].width} wide, layout shift ${all[0].detail.total.toFixed(2)} (over 0.1 is easy to notice). What moved most: ${all[0].detail.moved}`;
+  l.detail = { ...all[0].detail, per_page: all.map(f => ({ page: local(f.page), width: f.width, total: f.detail.total })) };
+  l.shot = all[0].shot || l.shot;
+}
 writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
-const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off' };
+const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on' };
 const md = ['# Visual checks', '', `${pages.length} page(s) at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
 const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));

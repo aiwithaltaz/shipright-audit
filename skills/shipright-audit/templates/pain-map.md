@@ -62,7 +62,7 @@ At least 10 rows. Kind is "Where it sits" or "How it works" (at least 3). Source
 
 ## Script leads
 
-One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##) and `samples/samples.md` (R##). Decision: the pain ID it became, or "Rejected: <what you saw>".
+One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##), `samples/samples.md` (R##), `consistency/consistency.md` (C##) and each `walk.md` (W-...). Decision: the pain ID it became, or "Rejected: <what you saw>".
 
 | Lead | Check | Decision |
 |---|---|---|
