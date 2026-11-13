@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Helper</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 24px 200px; }
+.reply { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.reply img { display: block; max-width: 100%; }
+.reply-footer { margin-top: 12px; font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; }
+.reply .acts { display: flex; gap: 8px; margin-top: 8px; }
+.reply .acts button { width: 28px; height: 28px; border: 1px solid #ccc; border-radius: 6px; background: #fff; }
+.composer { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd; padding: 12px 24px; }
+.composer form { max-width: 720px; margin: 0 auto; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; min-height: 4px; margin-bottom: 6px; }
+.chip { font-size: 12px; background: #e8eefc; border-radius: 999px; padding: 3px 10px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row textarea { flex: 1; height: 44px; padding: 10px; border: 1px solid #bbb; border-radius: 8px; font: inherit; }
+.row button { height: 44px; padding: 0 14px; border: 1px solid #bbb; border-radius: 8px; background: #fff; }
+.menu { position: absolute; bottom: 70px; width: 240px; background: #fff; border: 1px solid #ccc; border-radius: 10px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); }
+.menu [role=menuitemcheckbox] { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; background: none; font: inherit; text-align: left; }
+.menu [aria-checked="true"]::after { content: "On"; color: #1a56db; }
+.menu [aria-checked="false"]::after { content: "Off"; color: #777; }
+label.opt { display: block; margin: 12px 0; }
+</style></head>
+<body>
+<main>
+  <h1>Helper</h1>
+  <label class="opt"><input type="checkbox" id="compact"> Compact view</label>
+  <div id="thread"></div>
+</main>
+<div class="composer">
+  <form id="form">
+    <div class="chips" id="chips"></div>
+    <div class="row">
+      <button type="button" id="plus" aria-haspopup="menu" aria-expanded="false" aria-label="Add tools">+</button>
+      <textarea aria-label="Message" id="msg" placeholder="Ask anything"></textarea>
+      <button type="submit">Send</button>
+    </div>
+    <div class="menu" role="menu" aria-label="Tools" id="menu" hidden>
+      <button type="button" role="menuitemcheckbox" aria-checked="false" data-tool="Web search">Web search</button>
+      <button type="button" role="menuitemcheckbox" aria-checked="false" data-tool="Images">Images</button>
+      <button type="button" role="menuitemcheckbox" aria-checked="false" data-tool="Notes">Notes</button>
+    </div>
+  </form>
+</div>
+<script>
+  const menu = document.getElementById('menu'), plus = document.getElementById('plus'), chips = document.getElementById('chips'), thread = document.getElementById('thread');
+  const tell = what => fetch('/api/use?' + what, { method: 'POST' }).catch(() => {});
+  plus.onclick = () => { menu.hidden = !menu.hidden; plus.setAttribute('aria-expanded', String(!menu.hidden)); };
+  addEventListener('keydown', e => { if (e.key === 'Escape') { menu.hidden = true; plus.setAttribute('aria-expanded', 'false'); } });
+  menu.querySelectorAll('[role=menuitemcheckbox]').forEach(b => b.onclick = () => {
+    const on = b.getAttribute('aria-checked') !== 'true';
+    b.setAttribute('aria-checked', String(on));
+    tell('switch=' + encodeURIComponent(b.dataset.tool));
+    if (b.dataset.tool === 'Notes') return;
+    const have = [...chips.children].find(c => c.dataset.tool === b.dataset.tool);
+    if (on && !have) { const c = document.createElement('span'); c.className = 'chip'; c.dataset.tool = b.dataset.tool; c.textContent = b.dataset.tool + ' on'; chips.appendChild(c); }
+    if (!on && have) have.remove();
+  });
+  document.getElementById('compact').onchange = e => { tell('switch=compact'); document.body.style.fontSize = e.target.checked ? '14px' : ''; };
+  document.getElementById('form').onsubmit = e => {
+    e.preventDefault();
+    const box = document.getElementById('msg'), text = box.value.trim();
+    if (!text) return;
+    tell('message=' + encodeURIComponent(text));
+    box.value = '';
+    const ask = document.createElement('div'); ask.className = 'reply'; ask.textContent = text; thread.appendChild(ask);
+    setTimeout(() => {
+      const r = document.createElement('div'); r.className = 'reply';
+      r.innerHTML = '<p>Here is a picture of that.</p><img src="made-up-picture.png" alt="The picture you asked for" width="240" height="120"><div class="acts"><button type="button"></button><button type="button"></button></div><div class="reply-footer">This answer cost 0.4 cents · 1,204 words read · 3.2 seconds · standard model</div>';
+      thread.appendChild(r);
+    }, 600);
+  };
+</script>
+</body>
+</html>

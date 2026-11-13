@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shelf</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; background: #fff; }
+header { display: flex; gap: 16px; align-items: center; padding: 12px 24px; border-bottom: 1px solid #ddd; }
+header a { color: #1c1c1c; }
+main { padding: 24px; max-width: 960px; }
+input { font: inherit; font-size: 14px; height: 40px; padding: 0 12px; border: 1px solid #c9c9c9; border-radius: 8px; background: #fff; width: 320px; }
+.find-wide { border-radius: 20px; background: #f1f1f1; }
+.go { height: 40px; padding: 0 16px; border: 0; border-radius: 8px; background: #1a56db; color: #fff; font: inherit; font-size: 14px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; }
+.card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; min-height: 110px; background: #fff; }
+label { display: block; margin: 16px 0 6px; }
+</style></head>
+<body>
+<header><strong>Shelf</strong><a href="#/">Books</a><a href="#/library">Library</a></header>
+<main id="app"></main>
+<script>
+  const app = document.getElementById('app');
+  const cards = names => '<section class="cards">' + names.map(n => '<div class="card"><h2>' + n + '</h2><p>3 copies on the shelf</p></div>').join('') + '</section>';
+  function render() {
+    if (location.hash === '#/library') app.innerHTML = '<h1>Library</h1><input class="find-wide" type="search" placeholder="Search the library" aria-label="Search the library"><label for="card">Card number</label><input id="card" type="text"> <button class="go">Renew my card</button>' + cards(['Fiction', 'History', 'Travel']);
+    else app.innerHTML = '<h1>Books</h1><input type="search" placeholder="Search books" aria-label="Search books"><label for="name">Your name</label><input id="name" type="text"> <button class="go">Reserve a book</button>' + cards(['New this week', 'Most borrowed', 'Staff picks']);
+  }
+  addEventListener('hashchange', render); render();
+</script>
+</body>
+</html>

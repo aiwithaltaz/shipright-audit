@@ -2,7 +2,7 @@
 // One command for every repo check: npm test (or node tests/run.mjs).
 // Runs the offline self-tests, manifest and skill checks, a style scan, and the seeded-app check
 // (the last one only when Playwright is installed).
-import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,6 +46,7 @@ const bad = md.filter(p => /—|\bgenuinely\b|\bhonestly\b|\bstraightforward\b/i
 ok('style scan (no em dashes or banned words)', bad.length === 0, bad.join(', ') || `${md.length} files`);
 
 // 5. Seeded apps still contain every planted pain and Keep (needs Playwright)
+let busy = { leads: [], findings: [] };
 let hasPw = false;
 try { createRequire(join(root, 'package.json'))('playwright'); hasPw = true; } catch {}
 if (hasPw) {
@@ -74,8 +75,31 @@ if (hasPw) {
   ok(`visual checker finds all ${want.length} planted kinds after a slow load`, lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
-  const noise = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8')).findings.length;
+  busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
+  const noise = busy.findings.filter(f => f.width === 1280).length;
   ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
+  // At 390 the only lead is the one the answer key lists for this app: tables wider than a phone screen.
+  const phoneLeads = busy.leads.filter(l => l.widths.includes(390));
+  ok('visual checker at 390: only the sideways tables the answer key lists', phoneLeads.length === 1 && phoneLeads[0].kind === 'clipped-text' && phoneLeads[0].detail.how === 'screen' && phoneLeads[0].pages.every(p => /#\/(shifts|volunteers)$/.test(p)), phoneLeads.map(l => `${l.kind} on ${l.pages.join(', ')}`).join(' | ') || 'none');
+  // 8b. Clipped text: a reply footer cut off at 390 and fine at 1280 is one lead, at 390 only.
+  // The same page holds things that must not be flagged: long chat titles shortened in a list, a row
+  // of buttons that scrolls sideways, a code block, and a label only screen readers see.
+  const pout = mkdtempSync(join(tmpdir(), 'visual-phone-'));
+  run(['skills/shipright-audit/scripts/visual.mjs', 'tests/fixtures/phone-app/index.html', '--out', pout]);
+  const pl = JSON.parse(readFileSync(join(pout, 'visual.json'), 'utf8')).leads;
+  const clip = pl.filter(l => l.kind === 'clipped-text');
+  ok('clipped text: a reply footer cut off on phone is one lead, at 390 only', clip.length === 1 && clip[0].widths.join() === '390' && /cost 0\.4 cents/.test(clip[0].what) && /at 390 wide only/.test(clip[0].what) && !!clip[0].shot && pl.length === 1, pl.map(l => `${l.kind} @${l.widths.join('+')}: ${l.what.slice(0, 60)}`).join(' | ') || 'no leads');
+  // 8c. No clipped-text false alarms on the other fixtures. (visual-app is three fixed columns, so on a
+  // phone its page is wider than the screen: that one lead is true, and it is the only one.)
+  const falseAlarms = [];
+  for (const f of ['mini-app', 'gated-app', 'explore-app', 'visual-app']) {
+    const o = mkdtempSync(join(tmpdir(), 'clip-'));
+    run(['skills/shipright-audit/scripts/visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o]);
+    const cl = JSON.parse(readFileSync(join(o, 'visual.json'), 'utf8')).leads.filter(l => l.kind === 'clipped-text');
+    const allowed = f === 'visual-app' ? cl.filter(l => !(l.detail.how === 'screen' && l.widths.join() === '390')) : cl;
+    if (allowed.length || (f === 'visual-app' && cl.length !== 1)) falseAlarms.push(`${f}: ${cl.map(l => l.what.slice(0, 50)).join('; ')}`);
+  }
+  ok('clipped text: no false alarms on the existing fixtures', falseAlarms.length === 0, falseAlarms.join(' | ') || '4 fixtures');
   // 9. Login wall and session: without a session the gated app is a wall; with one the crawl gets in
   const sess = join(mkdtempSync(join(tmpdir(), 'sess-')), 'session.json');
   writeFileSync(sess, JSON.stringify({ cookies: [{ name: 'sr_test', value: '1', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' }], origins: [] }));
@@ -134,6 +158,174 @@ if (hasPw) {
   const lx = JSON.parse(readFileSync(join(lout, 'explore.json'), 'utf8'));
   const lres = n => (lx.controls.find(c => c.control === n) || {}).result || '';
   ok('explorer on a live app clicks only controls that open something', /could change data/.test(lres('Bookmark')) && /could change data/.test(lres('Handoff')) && /^opened/.test(lres('Settings')), `Bookmark: ${lres('Bookmark')}`);
+}
+
+// 15. Staying signed in on an app that swaps its sign-in token on every refresh (an old token gets 401).
+// The sign-in window's profile keeps working for every script; the saved session file alone goes stale.
+if (hasPw) {
+  const { startRotatingApp } = await import('./fixtures/rotating-app/server.mjs');
+  const app = await startRotatingApp();
+  const spawnNode = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root, env: { ...process.env, SHIPRIGHT_NO_HEADED: '1' } }); let err = '', out = ''; p.stderr.on('data', d => { err += d; }); p.stdout.on('data', d => { out += d; }); p.on('close', code => res({ code, err, out })); });
+  const dir = mkdtempSync(join(tmpdir(), 'rotate-')), prof = join(dir, 'profile'), sess = join(dir, 'session.json');
+  const S = 'skills/shipright-audit/scripts/';
+  const li = await spawnNode([S + 'login.mjs', `${app.url}?auto`, '--headless', '--timeout', '20', '--out', sess, '--profile', prof]);
+  ok('login.mjs prints the profile path and browser for the next script', li.code === 0 && li.out.includes(prof) && /Browser: /.test(li.out) && existsSync(join(prof, 'shipright-profile.json')), `exit ${li.code}`);
+  const c1 = await spawnNode([S + 'crawl.mjs', app.url, '--profile', prof, '--session', sess, '--out', join(dir, 'c1')]);
+  const cj = c1.code === 0 ? JSON.parse(readFileSync(join(dir, 'c1', 'crawl.json'), 'utf8')) : { screens: [] };
+  ok('crawl stays signed in with --profile on a token-rotating app', c1.code === 0 && cj.login_wall === false && cj.screens.length >= 3 && cj.screens.every(s => !s.asks_password) && /sign-in profile/.test(cj.signed_in_with || ''), `exit ${c1.code}, ${cj.screens.length} screens, ${cj.signed_in_with || c1.err.trim().split('\n').pop()}`);
+  // Every other script reuses the same profile, one after the other.
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify({ task: 'Open projects', steps: [{ do: 'click', text: 'Projects' }, { do: 'expect', text: 'Garden plan' }] }));
+  const others = [
+    ['explore', [S + 'explore.mjs', app.url, '--profile', prof, '--out', join(dir, 'e')]],
+    ['visual', [S + 'visual.mjs', app.url, '--profile', prof, '--out', join(dir, 'v')]],
+    ['consistency', [S + 'consistency.mjs', app.url, '--profile', prof, '--out', join(dir, 'k')]],
+    ['walk', [S + 'walk.mjs', app.url, join(dir, 'plan.json'), '--profile', prof, '--out', join(dir, 'w')]],
+  ];
+  const bad = [];
+  for (const [n, a] of others) { const r2 = await spawnNode(a); if (r2.code !== 0 || !/signed in with the sign-in profile/.test(r2.err)) bad.push(`${n}: exit ${r2.code} ${r2.err.trim().split('\n').pop()}`); }
+  ok('explore, visual, consistency and walk all stay signed in with --profile', bad.length === 0, bad.join(' | ') || `${others.length} scripts, ${app.stats.refresh_ok} token swaps`);
+  // One script at a time: a second script on the same profile stops with a clear message, and the profile stays good.
+  const [first, second] = await Promise.all([spawnNode([S + 'crawl.mjs', app.url, '--profile', prof, '--out', join(dir, 'p1')]), new Promise(r2 => setTimeout(r2, 700)).then(() => spawnNode([S + 'visual.mjs', app.url, '--profile', prof, '--no-click', '--out', join(dir, 'p2')]))]);
+  const afterBoth = await spawnNode([S + 'visual.mjs', app.url, '--profile', prof, '--no-click', '--out', join(dir, 'p3')]);
+  ok('two scripts never share a profile: the second one stops and says why', first.code === 0 && second.code === 2 && /in use by another script/.test(second.err) && afterBoth.code === 0, `first ${first.code}, second ${second.code}, after ${afterBoth.code}`);
+  // The session file was saved at sign-in. The app has swapped its token many times since: it must fail, loudly.
+  const c2 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--out', join(dir, 'c2')]);
+  ok('--session alone fails on a token-rotating app, with a clear message', c2.code === 3 && c2.err.includes('The app signed us out (401). Run login.mjs again.') && !existsSync(join(dir, 'c2', 'crawl.json')), `exit ${c2.code}: ${c2.err.trim().split('\n')[0]}`);
+  // A stale session falls back to nothing, but a stale session plus a good profile is fine (profile first).
+  const c3 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--profile', prof, '--out', join(dir, 'c3')]);
+  ok('profile is tried before the session file', c3.code === 0 && /signed in with the sign-in profile/.test(c3.err), `exit ${c3.code}`);
+  app.stop();
+  // A site that refuses headless browsers: retry once in a window placed off screen, and say which mode ran.
+  // This opens a real (off screen) window, so it only runs when asked: SHIPRIGHT_TEST_HEADED=1 npm test
+  if (process.env.SHIPRIGHT_TEST_HEADED === '1') {
+    const shy = await startRotatingApp({ refuseHeadless: true });
+    const d2 = mkdtempSync(join(tmpdir(), 'shy-')), p2 = join(d2, 'profile');
+    // Sign in with a window, because this app turns headless browsers away.
+    const l2 = await new Promise(res => { const p = spawn(process.execPath, [S + 'login.mjs', `${shy.url}?auto`, '--timeout', '30', '--out', join(d2, 's.json'), '--profile', p2], { cwd: root, env: { ...process.env, SHIPRIGHT_BROWSER: 'chromium' } }); p.on('close', code => res(code)); });
+    const h = await new Promise(res => { const p = spawn(process.execPath, [S + 'crawl.mjs', shy.url, '--profile', p2, '--out', join(d2, 'c')], { cwd: root }); let err = ''; p.stderr.on('data', d => { err += d; }); p.on('close', code => res({ code, err })); });
+    shy.stop();
+    ok('a site that refuses headless is retried in a window off screen', l2 === 0 && h.code === 0 && /window off screen/.test(h.err), `login ${l2}, crawl ${h.code}: ${h.err.trim().split('\n').pop()}`);
+  }
+}
+
+// 16. Existing results, opened read-only: a chat with a "click to load image" placeholder and a broken
+// image gives 2 leads, a chat with only working images gives none, and nothing is clicked.
+if (hasPw) {
+  const sout = mkdtempSync(join(tmpdir(), 'samples-'));
+  const sr = run(['skills/shipright-audit/scripts/samples.mjs', 'tests/fixtures/results-app/index.html', '--samples', '2', '--out', sout]);
+  const sm = sr.status === 0 ? JSON.parse(readFileSync(join(sout, 'samples.json'), 'utf8')) : { leads: [], items: [], lists: [] };
+  const hows = sm.leads.map(l => l.detail?.how).sort().join(',');
+  ok('samples: a load-image placeholder and a broken image are 2 leads', sm.leads.length === 2 && hows === 'broken image,load button' && sm.leads.every(l => l.id.startsWith('R') && l.pages.join() === '/index.html#/c/1' && l.widths.join() === '1280,390' && existsSync(join(sout, l.shot))), sm.leads.map(l => `${l.id} ${l.what.slice(0, 50)} on ${l.pages.join()}`).join(' | ') || `exit ${sr.status} ${sr.stderr.slice(0, 200)}`);
+  const working = sm.items.find(i => i.url.endsWith('#/c/2'));
+  ok('samples: a page with only working images gives no lead, and image pages are opened first', !!working && working.holds.images === 2 && existsSync(join(sout, working.shots['390'])) && sm.items.length === 2 && sm.lists[0]?.items_in_list === 4, `${sm.items.map(i => i.url).join(', ')}`);
+  // The crawl visits places before items, and at most 6 items of one list, so a long history cannot crowd out Settings.
+  const many = createServer((req, res2) => { res2.writeHead(200, { 'content-type': 'text/html' }); res2.end(`<nav>${Array.from({ length: 14 }, (_, i) => `<a href="/c/${i + 1}">Chat ${i + 1}</a>`).join('')}<a href="/settings">Settings</a><a href="/library">Library</a></nav><h1>${req.url}</h1>`); });
+  await new Promise(r2 => many.listen(0, '127.0.0.1', r2));
+  const mout = mkdtempSync(join(tmpdir(), 'crawl-many-'));
+  await new Promise(r2 => { const p = spawn(process.execPath, ['skills/shipright-audit/scripts/crawl.mjs', `http://127.0.0.1:${many.address().port}/`, '--out', mout], { cwd: root }); p.on('close', r2); });
+  many.close();
+  const mc = JSON.parse(readFileSync(join(mout, 'crawl.json'), 'utf8'));
+  const paths = mc.screens.map(sc => new URL(sc.url).pathname);
+  ok('crawl reaches Settings past a long list of items', paths.includes('/settings') && paths.includes('/library') && paths.filter(p => p.startsWith('/c/')).length === 6 && mc.item_lists?.[0]?.links === 14, `${paths.join(' ')}`);
+}
+
+// 17. Used as a user (only with the owner's yes). A menu switch that adds a chip to the message box:
+// with --use it is a toggle-side-effect lead and every switch ends as it started; without --use nothing
+// is flipped. A test message marked owner_said_yes is sent once, and its result is checked at both widths.
+if (hasPw) {
+  const hits = [];
+  const useApp = createServer((req, res2) => { if (req.url.startsWith('/api/use')) { hits.push(decodeURIComponent(req.url.split('?')[1] || '')); res2.writeHead(204); return res2.end(); } if (req.url !== '/') { res2.writeHead(404); return res2.end(); } res2.writeHead(200, { 'content-type': 'text/html' }); res2.end(readFileSync(join(root, 'tests/fixtures/use-app/index.html'))); });
+  await new Promise(r2 => useApp.listen(0, '127.0.0.1', r2));
+  const useUrl = `http://127.0.0.1:${useApp.address().port}/`;
+  const go = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root }); p.on('close', code => res(code)); });
+  const u0 = mkdtempSync(join(tmpdir(), 'use-off-')), u1 = mkdtempSync(join(tmpdir(), 'use-on-'));
+  await go(['skills/shipright-audit/scripts/explore.mjs', useUrl, '--out', u0]);
+  const off = JSON.parse(readFileSync(join(u0, 'explore.json'), 'utf8'));
+  ok('without --use, no switch is flipped', hits.length === 0 && off.use.enabled === false && off.use.switches_flipped === 0 && !off.leads.some(l => l.kind === 'toggle-side-effect'), `${hits.length} flip(s) reached the app`);
+  hits.length = 0;
+  await go(['skills/shipright-audit/scripts/explore.mjs', useUrl, '--use', '--out', u1]);
+  const on = JSON.parse(readFileSync(join(u1, 'explore.json'), 'utf8'));
+  const side = on.leads.filter(l => l.kind === 'toggle-side-effect');
+  const flips = on.switches.filter(t => t.flipped);
+  const perSwitch = n => hits.filter(h => h === `switch=${n}`).length;
+  ok('--use: a menu switch that adds a chip to the message box is a toggle-side-effect lead', side.length === 1 && /Web search/.test(side[0].what) && /next to the message box/.test(side[0].what) && side[0].detail.switches.join() === 'Web search,Images' && existsSync(join(u1, side[0].shot)), side.map(l => l.what).join(' | ') || 'no lead');
+  ok('--use: every switch ends in its original state', flips.length === 4 && flips.every(t => t.restored && t.final === t.before && t.shots.before && t.shots.after) && ['Web search', 'Images', 'Notes', 'compact'].every(n => perSwitch(n) === 2) && on.use.turned_back === 4, `${flips.length} flipped, ${on.use.turned_back} turned back, ${hits.length} flips reached the app`);
+  hits.length = 0;
+  const wdir = mkdtempSync(join(tmpdir(), 'use-walk-')), wplan = join(wdir, 'plan.json');
+  writeFileSync(wplan, JSON.stringify({ task: 'Send a test message', steps: [{ do: 'fill', field: 'Message', value: 'ShipRight test: please ignore', owner_said_yes: true }, { do: 'click', text: 'Send', owner_said_yes: true }, { do: 'expect', text: 'Here is a picture' }] }));
+  const wcode = await go(['skills/shipright-audit/scripts/walk.mjs', useUrl, wplan, '--out', join(wdir, 'out')]);
+  useApp.close();
+  const wj = JSON.parse(readFileSync(join(wdir, 'out', 'walk.json'), 'utf8'));
+  const kindsAt = wj.leads.map(l => `${l.kind}@${l.widths.join('+')}`).sort().join(' ');
+  ok('an owner-approved test message is sent once and its result is checked at both widths', wcode === 0 && hits.length === 1 && wj.used_actions.length === 2 && wj.widths['390'].once_at === 1 && wj.widths['390'].broke_at === null && kindsAt === 'clipped-text@390 media-not-loaded@1280+390 unnamed-action@1280+390' && existsSync(join(wdir, 'out', '390-02-result.png')), `exit ${wcode}, ${hits.length} message(s) sent, ${kindsAt}`);
+}
+
+// 18. The owner's own rules. A folder with a design doc holding one rule the app breaks (cards 16px
+// apart; they sit 28px apart) and one decision the app follows on purpose (a blunt greeting), plus a
+// complaints file that must never be opened.
+{
+  const adir = mkdtempSync(join(tmpdir(), 'rules-')), rulesOut = join(adir, 'owner-rules.md');
+  const or = run(['skills/shipright-audit/scripts/owner-rules.mjs', 'tests/fixtures/owner-rules-app', '--out', rulesOut]);
+  const rules = existsSync(rulesOut) ? readFileSync(rulesOut, 'utf8') : '';
+  ok('owner-rules.mjs quotes the rule and the decision with file and line', or.status === 0 && /"Cards always sit 16px apart, on every screen\." \| DESIGN\.md:5/.test(rules) && /\| decision \| "The greeting is blunt on purpose\. Keep it: "Back again\? Fine\."" \| DESIGN\.md:10/.test(rules) && /We decided against a friendlier one.*CHANGELOG\.md:5/.test(rules), or.stdout.trim().slice(0, 90));
+  ok('owner-rules.mjs never opens a complaints file, and says it skipped it', /- current-complaints\.md: its name says/.test(rules) && !/too far apart|Search is slow/i.test(rules + or.stdout), 'current-complaints.md');
+  // The gate, on the real owner-rules.md: the rule break is a pain with an Owner rule lens, the decision
+  // sits under Owner decisions respected, and the section is required.
+  const { check, samplePainMap } = await import('../skills/shipright-audit/scripts/check-stage.mjs');
+  mkdirSync(join(adir, 'screens'));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(adir, f), '');
+  const map = samplePainMap().replace('Context used: none given', 'Context used: DESIGN.md and CHANGELOG.md (owner rules); skipped current-complaints.md (may list current complaints)')
+    .replace('| P01 | Rule shown late | Book step 4, screens/book-1280.png | Owners | H5 |', '| P01 | The home cards sit 28px apart | Home, screens/home-1280.png | Owners | Owner rule: "Cards always sit 16px apart, on every screen." |');
+  const respected = '\n## Owner decisions respected\n| What the app does | Owner\'s words (quoted) | File and line | What it differs from |\n|---|---|---|---|\n| Greets with "Back again? Fine." | "The greeting is blunt on purpose. Keep it: "Back again? Fine."" | DESIGN.md:10 | Leaders greet warmly |\n';
+  const without = check(map, adir), withIt = check(map + respected, adir);
+  ok('gate: a rule break is a pain with an Owner rule lens, a kept decision is respected, the section is required', without.some(e => e.includes('Missing section "## Owner decisions respected"')) && withIt.length === 0, withIt.join(' | ') || `${without.length} problem(s) without the section, 0 with it`);
+  // The fixture is what the design doc says it is: the cards sit 28px apart, and the greeting is the blunt one.
+  if (hasPw) {
+    const { chromium } = createRequire(join(root, 'package.json'))('playwright');
+    const b = await chromium.launch(); const pg = await b.newPage({ viewport: { width: 1280, height: 800 } });
+    await pg.goto('file://' + join(root, 'tests/fixtures/owner-rules-app/index.html'));
+    const m = await pg.evaluate(() => { const c = [...document.querySelectorAll('.card')].map(x => x.getBoundingClientRect()); return { gap: Math.round(c[1].left - c[0].right), greeting: document.getElementById('greeting').textContent }; });
+    await b.close();
+    ok('owner-rules fixture breaks the spacing rule and keeps the greeting', m.gap === 28 && m.greeting === 'Back again? Fine.', `gap ${m.gap}px, greeting "${m.greeting}"`);
+  }
+}
+
+// 19. Design-system drift, layout shift and reduced motion.
+if (hasPw) {
+  const S7 = 'skills/shipright-audit/scripts/';
+  const leadsOf = (dir, file) => JSON.parse(readFileSync(join(dir, file), 'utf8')).leads;
+  // Two pages, one search box with a different radius and background: exactly one component-drift lead.
+  const kd = mkdtempSync(join(tmpdir(), 'drift-'));
+  run([S7 + 'consistency.mjs', 'tests/fixtures/drift-app/index.html', '--routes', '#/library', '--out', kd]);
+  const drift = leadsOf(kd, 'consistency.json');
+  ok('component drift: one odd search box on a 2-page app is exactly one lead', drift.length === 1 && drift[0].id === 'C01' && drift[0].kind === 'component-drift' && drift[0].component === 'search input' && drift[0].detail.odd[0].differs_in.join() === 'radius,background' && drift[0].pages.join() === '/index.html#/library' && drift[0].shots.length === 2 && drift[0].shots.every(f => existsSync(join(kd, f))), drift.map(l => `${l.component}: ${l.detail.odd.map(o => o.differs_in.join('+')).join('; ')}`).join(' | ') || 'no lead');
+  // A banner that arrives after the page loaded: a layout-shift lead. A menu that still slides in with
+  // "reduce motion" on: a reduced-motion lead.
+  const sv = mkdtempSync(join(tmpdir(), 'shift-v-')), se = mkdtempSync(join(tmpdir(), 'shift-e-'));
+  run([S7 + 'visual.mjs', 'tests/fixtures/shift-app/index.html', '--out', sv]);
+  run([S7 + 'explore.mjs', 'tests/fixtures/shift-app/index.html', '--out', se]);
+  const shiftLead = leadsOf(sv, 'visual.json').filter(l => l.kind === 'layout-shift');
+  ok('layout shift: a banner inserted after load is a lead', shiftLead.length === 1 && shiftLead[0].detail.total > 0.1 && /jumps after it has loaded/.test(shiftLead[0].what), shiftLead.map(l => l.what.slice(0, 80)).join(' | ') || 'no lead');
+  const motionLead = leadsOf(se, 'explore.json').filter(l => l.kind === 'reduced-motion');
+  ok('reduced motion: a menu that still slides in is a lead', motionLead.length === 1 && /After opening "Menu"/.test(motionLead[0].what) && /transform/.test(motionLead[0].what), motionLead.map(l => l.what.slice(0, 90)).join(' | ') || 'no lead');
+  // No false alarms from the new checks on the fixtures that were not built for them, or on a busy app.
+  const loud = [];
+  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded'];
+  for (const f of ['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app']) {
+    const o1 = mkdtempSync(join(tmpdir(), 'fa-v-')), o2 = mkdtempSync(join(tmpdir(), 'fa-e-')), o3 = mkdtempSync(join(tmpdir(), 'fa-k-'));
+    run([S7 + 'visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o1]);
+    run([S7 + 'explore.mjs', `tests/fixtures/${f}/index.html`, '--out', o2]);
+    if (f !== 'drift-app') run([S7 + 'consistency.mjs', `tests/fixtures/${f}/index.html`, '--out', o3]);
+    const got = [...leadsOf(o1, 'visual.json'), ...leadsOf(o2, 'explore.json'), ...(f !== 'drift-app' ? leadsOf(o3, 'consistency.json') : [])].filter(l => NEW.includes(l.kind));
+    if (got.length) loud.push(`${f}: ${got.map(l => l.kind).join(', ')}`);
+  }
+  const bk = mkdtempSync(join(tmpdir(), 'fa-busy-'));
+  run([S7 + 'consistency.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', bk]);
+  const busyDrift = leadsOf(bk, 'consistency.json');
+  if (busyDrift.length) loud.push(`busy app: ${busyDrift.map(l => l.component).join(', ')}`);
+  const busyNew = busy.leads.filter(l => NEW.includes(l.kind));
+  if (busyNew.length) loud.push(`busy app (visual): ${busyNew.map(l => l.kind).join(', ')}`);
+  ok('drift, layout shift and reduced motion: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
 }
 
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)

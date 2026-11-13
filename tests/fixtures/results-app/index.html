@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Study helper</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+.shell { display: flex; min-height: 100vh; }
+aside { width: 220px; border-right: 1px solid #ddd; padding: 16px; flex: none; }
+aside h2 { font-size: 13px; margin: 16px 0 8px; }
+aside a { display: block; padding: 6px 0; color: #1c1c1c; }
+main { flex: 1; min-width: 0; padding: 24px; max-width: 760px; }
+.msg { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.placeholder { width: 240px; max-width: 100%; height: 120px; border: 1px dashed #999; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+img { max-width: 100%; border-radius: 8px; display: block; }
+@media (max-width: 700px) { .shell { display: block; } aside { width: auto; border-right: 0; border-bottom: 1px solid #ddd; } }
+</style></head>
+<body>
+<div class="shell">
+  <aside>
+    <nav aria-label="Past chats">
+      <h2>Chats</h2>
+      <a href="#/c/1">Cell diagram</a>
+      <a href="#/c/2">Rainfall chart</a>
+      <a href="#/c/3">Essay outline</a>
+      <a href="#/c/4">Verb list</a>
+    </nav>
+  </aside>
+  <main id="app"></main>
+</div>
+<script>
+  const app = document.getElementById('app');
+  const pages = {
+    '#/c/1': '<h1>Cell diagram</h1><div class="msg"><p>Draw a plant cell.</p></div><div class="msg"><p>Here is the diagram.</p><div class="placeholder"><button type="button">Click to load image</button></div><p>And a close-up of the cell wall.</p><img src="missing-closeup.png" alt="Close-up of the cell wall" width="240" height="120"></div>',
+    '#/c/2': '<h1>Rainfall chart</h1><div class="msg"><p>Chart the rainfall by month.</p></div><div class="msg"><p>Here is the chart.</p><img src="chart.png" alt="Rainfall by month" width="240" height="120"><p>And the same data for last year.</p><img src="chart.png" alt="Rainfall last year" width="240" height="120"></div>',
+    '#/c/3': '<h1>Essay outline</h1><div class="msg"><p>Outline an essay on rivers.</p></div><div class="msg"><p>One: where rivers start. Two: what they carry. Three: where they end.</p></div>',
+    '#/c/4': '<h1>Verb list</h1><div class="msg"><p>List ten verbs.</p></div><div class="msg"><p>Run, walk, read, write, draw, sing, cook, swim, climb, rest.</p></div>'
+  };
+  function render() { app.innerHTML = pages[location.hash] || '<h1>Study helper</h1><p>Pick a chat on the left, or start a new one.</p>'; }
+  addEventListener('hashchange', render); render();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ledger</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; padding: 24px; color: #1c1c1c; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; max-width: 960px; }
+.card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; }
+@media (max-width: 700px) { .cards { grid-template-columns: 1fr; } }
+</style></head>
+<body>
+<h1 id="greeting">Back again? Fine.</h1>
+<p>3 invoices are waiting for you.</p>
+<section class="cards">
+  <div class="card"><h2>Waiting</h2><p>3 invoices</p><button>Open waiting invoices</button></div>
+  <div class="card"><h2>Paid this week</h2><p>12 invoices</p><button>See paid invoices</button></div>
+  <div class="card"><h2>Late</h2><p>1 invoice</p><button>Chase the late invoice</button></div>
+</section>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Planner</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid #ddd; position: relative; }
+main { padding: 24px; max-width: 760px; }
+.notice { background: #fff3c4; padding: 24px; height: 380px; font-size: 20px; }
+.menu { position: absolute; right: 24px; top: 52px; width: 200px; background: #fff; border: 1px solid #ccc; border-radius: 10px; padding: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15); animation: drop .4s ease-out; }
+.menu a { display: block; padding: 8px; color: #1c1c1c; }
+@keyframes drop { from { transform: translateY(-24px) scale(.9); opacity: 0; } to { transform: none; opacity: 1; } }
+.spinner { width: 16px; height: 16px; border: 2px solid #ccc; border-top-color: #333; border-radius: 50%; display: inline-block; }
+</style></head>
+<body>
+<div id="top"></div>
+<header>
+  <strong>Planner</strong>
+  <button id="more" aria-haspopup="menu" aria-expanded="false">Menu</button>
+  <div class="menu" role="menu" aria-label="Menu" id="menu" hidden><a href="#/week" role="menuitem">This week</a><a href="#/month" role="menuitem">This month</a></div>
+</header>
+<main>
+  <h1>Today</h1>
+  <p>Three things are planned for today. The first one starts at nine.</p>
+  <p>Water the plants. Call the plumber. Pick up the parcel before the shop closes at six.</p>
+</main>
+<script>
+  const menu = document.getElementById('menu'), more = document.getElementById('more');
+  more.onclick = () => { menu.hidden = !menu.hidden; more.setAttribute('aria-expanded', String(!menu.hidden)); };
+  addEventListener('keydown', e => { if (e.key === 'Escape') { menu.hidden = true; more.setAttribute('aria-expanded', 'false'); } });
+  addEventListener('load', () => setTimeout(() => {
+    const n = document.createElement('div'); n.className = 'notice'; n.textContent = 'New: plans can repeat every week.';
+    document.getElementById('top').appendChild(n);
+  }, 700));
+</script>
+</body>
+</html>

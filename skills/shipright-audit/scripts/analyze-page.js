@@ -5,7 +5,21 @@
 // and style inventory visual.mjs writes (minus the crop screenshots, which you take yourself).
 // Thresholds are CSS pixels at 1280 wide: 6px is the smallest misalignment people notice side by side;
 // 40px is a gap that reads as "empty" in a card.
-var SHIPRIGHT_ANALYZE = () => {
+// Run it at 1280 wide and again at 390 wide: clipped text and sideways overflow mostly show on phone.
+// Options (all optional), for the scripts:
+//   within  a CSS selector: the text checks only look inside matching elements (an open menu or dialog)
+//   only    a list of lead kinds to keep, for example ['clipped-text']
+//   results true on a page that shows a result (a past chat, a file, a reply to a test message): also
+//           counts action buttons that have no name at all
+//   shiftWithInput  true to count layout shifts that follow a click too (the scripts use it to see
+//           whether opening a menu makes the page behind it jump)
+// Layout shift: it sums how far things moved from the moment the page finished loading until now (or
+// since window.__srShiftFrom, a performance.now() time you can set). The first render does not count
+// (anything up to 300ms after the load event): only jumps a person sees after the page looked ready.
+// Run it after the page has settled. Over 0.1 is a lead.
+// Reduced motion: switch the browser to "reduce motion" (in DevTools: Rendering, Emulate CSS media
+// feature prefers-reduced-motion), reload, open a menu and run it at once. Anything still moving is a lead.
+var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const ALIGN_PX = 6, GAP_MIN = 40, GAP_RATIO = 2.5, PILL_WORDS = 4, PILL_CHARS = 30, PILLS_PER_CARD = 4;
   // A card's only worded action is buried when 10+ lines of text sit between the title and it.
   // A card is overloaded when it carries more than 7 small labels and pills to read.
@@ -19,6 +33,14 @@ var SHIPRIGHT_ANALYZE = () => {
   const tag = el => { if (!el.dataset.srv) el.dataset.srv = 'm' + (++mark); return el.dataset.srv; };
   const findings = [];
   const add = (f, el) => findings.push({ ...f, mark: el ? tag(el) : null });
+  // Visible to a person: also false when an ancestor is faded out (opacity does not inherit).
+  const shown = el => {
+    if (!vis(el)) return false;
+    if (el.checkVisibility) return el.checkVisibility({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true });
+    for (let x = el; x && x !== document.documentElement; x = x.parentElement) if (Number(getComputedStyle(x).opacity) < 0.05) return false;
+    return true;
+  };
+  const inScope = el => !opts.within || !!el.closest(opts.within);
 
   // Pills: small, fully rounded, filled or outlined chips with text.
   const isPill = el => {
@@ -139,6 +161,169 @@ var SHIPRIGHT_ANALYZE = () => {
     }
   }
 
+  // Clipped text: words a person cannot read in full. Either the box that holds them hides what
+  // overflows it (overflow hidden, with or without "..."), or they run past the edge of the screen.
+  // Text counts as cut when at least 12px of it shows and more than 2px of it is hidden: fully hidden
+  // text (the next slide, a closed drawer, screen-reader-only labels) is not "cut off".
+  // Not flagged: rows that are meant to scroll sideways (code, tables, tab rows, any row of buttons or
+  // links, anything with a visible scrollbar or a fade mask), and long titles shortened with "..." in a
+  // list of links (chat history, file lists), which is a normal pattern.
+  {
+    const CLIP_PX = 2, CLIP_SEEN = 12;
+    const vw = document.documentElement.clientWidth;
+    // The nearest ancestor that clips what overflows it sideways. Fixed boxes escape every ancestor;
+    // absolute boxes escape ancestors that are not positioned.
+    const clipHost = node => {
+      let skip = false;
+      for (let el = node.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        const cs = getComputedStyle(el);
+        if (!skip || cs.position !== 'static') {
+          skip = false;
+          if (cs.overflowX !== 'visible') return { el, cs, scrolls: cs.overflowX === 'auto' || cs.overflowX === 'scroll' };
+        }
+        if (cs.position === 'fixed') return null;
+        if (cs.position === 'absolute') skip = true;
+      }
+      return null;
+    };
+    const meantToScroll = (host, p) => {
+      if (host.el.scrollWidth - host.el.clientWidth <= CLIP_PX) return false;
+      if (host.el.matches('pre, code, table, [role=tablist], [role=table], [role=grid]') || p.closest('pre, code, table, [role=tablist]')) return true;
+      const bar = host.el.offsetHeight - host.el.clientHeight - parseFloat(host.cs.borderTopWidth) - parseFloat(host.cs.borderBottomWidth);
+      if (bar > 2) return true;
+      if ((host.cs.maskImage && host.cs.maskImage !== 'none') || (host.cs.webkitMaskImage && host.cs.webkitMaskImage !== 'none')) return true;
+      return !!host.el.querySelector('a[href], button, input, [role=button], [role=tab], [role=option], [role=link]');
+    };
+    const moving = el => { try { return el.getAnimations({ subtree: true }).some(a => a.playState === 'running'); } catch { return false; } };
+    const groups = new Map();
+    const range = document.createRange();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t.length < 2) continue;
+      const p = n.parentElement;
+      if (!p || p.closest('script, style, noscript, template, select, textarea, [aria-hidden="true"]') || !inScope(p) || !shown(p)) continue;
+      range.selectNodeContents(n);
+      const r = range.getBoundingClientRect();
+      if (r.width < 4 || r.height < 6) continue;
+      const host = clipHost(n);
+      // With no clipping ancestor the screen is the edge. Measure from the page's left edge, so a page
+      // that happens to be scrolled sideways gives the same answer.
+      let left = -scrollX, right = vw - scrollX, how = 'screen';
+      if (host) {
+        const hr = host.el.getBoundingClientRect();
+        if (hr.width < 24 || hr.height < 8 || hr.right <= 0 || hr.left >= vw) continue;
+        left = hr.left + parseFloat(host.cs.borderLeftWidth); right = left + host.el.clientWidth;
+        if (host.scrolls) { if (meantToScroll(host, p)) continue; how = 'scroll'; }
+        else how = host.cs.textOverflow === 'ellipsis' ? 'dots' : 'box';
+      }
+      const hidden = Math.max(r.right - right, left - r.left);
+      const seen = Math.min(r.right, right) - Math.max(r.left, left);
+      if (hidden <= CLIP_PX || seen < CLIP_SEEN) continue;
+      if (host && moving(host.el)) continue; // a ticker or a slide in motion
+      if (how === 'dots') {
+        const item = p.closest('a, button, [role=option], [role=menuitem], [role=tab], [role=link], [role=treeitem]');
+        const scope = item && (item.parentElement?.parentElement || item.parentElement);
+        if (scope && [...scope.querySelectorAll(item.tagName)].filter(x => sig(x) === sig(item)).length >= 3) continue;
+      }
+      let el = host && !host.scrolls && host.el.getBoundingClientRect().height <= 400 ? host.el : p;
+      // Past the screen edge: crop the widest thing that sticks out (the table, not one cell), and
+      // report one lead per page, because it is one problem: the page is wider than the screen.
+      if (how === 'screen') while (el.parentElement && el.parentElement !== document.body && el.parentElement.getBoundingClientRect().right > right + CLIP_PX && el.parentElement.getBoundingClientRect().height <= 1200) el = el.parentElement;
+      const key = how === 'screen' ? 'screen' : how + '|' + sig(host ? host.el : p);
+      const g = groups.get(key) || { how, el, texts: [], hidden: 0 };
+      if (!g.texts.includes(t)) g.texts.push(t);
+      g.hidden = Math.max(g.hidden, Math.round(hidden));
+      groups.set(key, g);
+    }
+    const HOW = { dots: 'Text is shortened with "..."', box: 'Text is cut off at the edge of its box', scroll: 'Text is cut off, and nothing shows that the line scrolls sideways', screen: 'Text runs past the edge of the screen' };
+    for (const [key, g] of groups) {
+      const more = g.texts.length - 1;
+      add({ kind: 'clipped-text', group: key, what: `${HOW[g.how]}: "${g.texts[0].slice(0, 90)}"${more ? ` (and ${more} more like it)` : ''}`, detail: { how: g.how, hidden_px: g.hidden, texts: g.texts.slice(0, 5), count: g.texts.length, screen_width: vw } }, g.el);
+    }
+  }
+
+  // Media that never loaded: an image the browser gave up on, a video with nothing to play, or a
+  // placeholder that makes the user press "load image" before anything shows.
+  {
+    const TRACKER = /pixel|track|beacon|analytics|collect|\.gif\?/i, SVG = /\.svg(\?|#|$)|^data:image\/svg/i;
+    const hiddenBy = el => { const st = getComputedStyle(el); return st.display === 'none' || st.visibility === 'hidden'; };
+    const label = el => (el.getAttribute('alt') || '').trim() || ((el.currentSrc || el.getAttribute('src') || '').split(/[?#]/)[0].split('/').pop() || 'no name').slice(0, 60);
+    const broken = [...document.querySelectorAll('img')].filter(img => {
+      const src = img.currentSrc || img.getAttribute('src') || '';
+      if (!src || SVG.test(src) || TRACKER.test(src) || !inScope(img) || hiddenBy(img)) return false;
+      if (Number(img.getAttribute('width')) === 1 || Number(img.getAttribute('height')) === 1) return false;
+      return img.complete && img.naturalWidth === 0;
+    });
+    if (broken.length) add({ kind: 'media-not-loaded', group: 'broken-image', what: `An image did not load: "${label(broken[0])}"${broken.length > 1 ? ` (and ${broken.length - 1} more)` : ''}`, detail: { how: 'broken image', images: broken.slice(0, 5).map(label), count: broken.length } }, broken[0].getBoundingClientRect().width > 8 ? broken[0] : broken[0].parentElement);
+    const dead = [...document.querySelectorAll('video')].filter(v => inScope(v) && !hiddenBy(v) && (v.error || (v.networkState === 3 && (v.getAttribute('src') || v.querySelector('source')))));
+    if (dead.length) add({ kind: 'media-not-loaded', group: 'broken-video', what: `A video did not load${dead.length > 1 ? ` (${dead.length} on this page)` : ''}`, detail: { how: 'broken video', count: dead.length } }, dead[0]);
+    const LOAD = /\b(click|tap|press)( here)? to load\b|\b(click|tap|press)( here)? to (show|see|reveal|display) (the |this )?(image|photo|picture|video|media|preview|attachment)|^(load|show|reveal|display) (the |this )?(image|images|photo|picture|video|media|preview|attachment)s?$/i;
+    const loaders = [...document.querySelectorAll('button, [role=button], a')].filter(b => inScope(b) && shown(b) && LOAD.test((text(b) || b.getAttribute('aria-label') || '').slice(0, 60)));
+    if (loaders.length) { const name = text(loaders[0]) || loaders[0].getAttribute('aria-label'); add({ kind: 'media-not-loaded', group: 'load-button|' + name.toLowerCase(), what: `Media does not show until the user presses "${name}"${loaders.length > 1 ? ` (${loaders.length} on this page)` : ''}`, detail: { how: 'load button', button: name, count: loaders.length } }, loaders[0].parentElement && loaders[0].parentElement.getBoundingClientRect().height <= 500 ? loaders[0].parentElement : loaders[0]); }
+  }
+
+  // On a result page: action buttons with no name at all. No visible words, no label for screen
+  // readers, no tooltip text and no named icon inside, so nobody can tell what they do before pressing.
+  if (opts.results) {
+    const named = el => {
+      if (/[\p{L}\p{N}]/u.test(text(el))) return true;
+      if ((el.getAttribute('aria-label') || el.getAttribute('title') || '').trim()) return true;
+      const by = el.getAttribute('aria-labelledby');
+      if (by && by.split(/\s+/).some(id => text(document.getElementById(id) || { innerText: '' }))) return true;
+      return [...el.querySelectorAll('img[alt], svg title, [aria-label], [title]')].some(x => (x.getAttribute('alt') || x.getAttribute('aria-label') || x.getAttribute('title') || x.textContent || '').trim());
+    };
+    const nameless = [...document.querySelectorAll('button, [role=button], a[href]')].filter(el => inScope(el) && shown(el) && !named(el));
+    if (nameless.length) add({ kind: 'unnamed-action', group: 'unnamed-action', what: `${nameless.length} action button${nameless.length === 1 ? ' has' : 's have'} no name: no words, no label for screen readers and no tooltip text`, detail: { count: nameless.length } }, nameless[0].parentElement || nameless[0]);
+  }
+
+  const describe = el => { if (!el || !el.tagName) return 'the page'; const t = text(el).slice(0, 50); const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/)[0] : ''; return `${el.tagName.toLowerCase()}${cls}${t ? ` "${t}"` : ''}`; };
+
+  // Layout shift: content that jumps after it was first shown (a banner that arrives late, an image
+  // with no size, a font swap). The browser reports each jump; over 0.1 in total is easy to notice.
+  const shift = { total: 0, count: 0 };
+  try {
+    if (typeof PerformanceObserver !== 'undefined' && (PerformanceObserver.supportedEntryTypes || []).includes('layout-shift')) {
+      const S = (window.__srShift = window.__srShift || { log: [], po: null });
+      if (!S.po) { S.po = new PerformanceObserver(l => S.log.push(...l.getEntries())); S.po.observe({ type: 'layout-shift', buffered: true }); }
+      S.log.push(...S.po.takeRecords());
+      const nav = (performance.getEntriesByType('navigation') || [])[0];
+      // 300ms of grace after the load event: many apps draw their first screen right at load, and
+      // that first draw is not a jump anyone sees.
+      const from = Math.max(window.__srShiftFrom || 0, nav ? (nav.loadEventStart || nav.domContentLoadedEventEnd || 0) + 300 : 0);
+      const mine = S.log.filter(e => e.startTime >= from && (opts.shiftWithInput || !e.hadRecentInput));
+      shift.count = mine.length;
+      shift.total = Math.round(mine.reduce((a, e) => a + e.value, 0) * 1000) / 1000;
+      if (shift.total > 0.1) {
+        const worst = mine.slice().sort((a, b) => b.value - a.value)[0];
+        const node = ((worst.sources || []).map(x => x.node).filter(n => n && n.nodeType === 1 && n.isConnected).sort((a, b) => a.getBoundingClientRect().height - b.getBoundingClientRect().height)[0]) || null;
+        add({ kind: 'layout-shift', group: 'layout-shift', what: `The page jumps after it has loaded: layout shift ${shift.total.toFixed(2)} (over 0.1 is easy to notice). What moved most: ${describe(node)}`, detail: { total: shift.total, shifts: shift.count, moved: describe(node) } }, node && node !== document.body ? node : null);
+      }
+    }
+  } catch (e) {}
+
+  // Reduced motion: people who ask their device for less motion should not get things sliding and
+  // zooming. Only checked when the page is in "reduce motion" mode. Fades are fine; spinners and
+  // progress bars are essential. Anything else that still moves is a lead.
+  const motion = { reduced: false, moving: [] };
+  try {
+    motion.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const MOVES = /transform|translate|scale|rotate|^(top|left|right|bottom|inset|width|height|max-?height|max-?width|margin|padding)/i;
+    for (const a of document.getAnimations()) {
+      if (a.playState !== 'running' || !a.effect || !a.effect.target) continue;
+      const el = a.effect.target, timing = a.effect.getTiming();
+      if (Number(timing.duration) < 50 || !vis(el)) continue;
+      if (el.closest('[role=progressbar], [aria-busy="true"], [class*=spinner i], [class*=loading i], [class*=loader i], [class*=skeleton i], [class*=progress i]')) continue;
+      const props = [...new Set(a.effect.getKeyframes().flatMap(k => Object.keys(k)))].filter(k => MOVES.test(k));
+      if (props.length) motion.moving.push({ el, what: describe(el), props, ms: Math.round(Number(timing.duration)), forever: timing.iterations === Infinity });
+    }
+    if (motion.reduced && motion.moving.length) {
+      const m = motion.moving[0];
+      add({ kind: 'reduced-motion', group: 'reduced-motion|' + sig(m.el), what: `With "reduce motion" on, ${motion.moving.length === 1 ? 'something still moves' : `${motion.moving.length} things still move`}: ${m.what} animates ${m.props.join(', ')} ${m.forever ? 'without end' : `for ${m.ms}ms`}`, detail: { moving: motion.moving.slice(0, 5).map(x => ({ what: x.what, props: x.props, ms: x.ms, forever: x.forever })) } }, m.el);
+    }
+    motion.moving = motion.moving.map(x => ({ what: x.what, props: x.props, ms: x.ms, forever: x.forever }));
+  } catch (e) {}
+
   // Corner scale: what radius do cards and buttons use?
   const rounded = [...groups.flatMap(g => g.items), ...document.querySelectorAll('button, input, select, textarea, [role=button]')]
     .filter(vis).map(el => ({ el, r: radius(el), h: el.getBoundingClientRect().height })).filter(x => x.r < x.h / 2 - 1);
@@ -179,5 +364,6 @@ var SHIPRIGHT_ANALYZE = () => {
   };
   const main = document.querySelector('main') || document.body;
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
-  return { findings, medianRadius, scale, counts, empty, style, title: document.title };
+  const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
+  return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, title: document.title, width: document.documentElement.clientWidth };
 };
