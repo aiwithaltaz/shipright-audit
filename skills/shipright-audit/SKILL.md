@@ -27,7 +27,7 @@ Audit progress:
 - [ ] 2. Core tasks named
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
-- [ ] 4b. Category leaders compared, information architecture checked
+- [ ] 4b. Category leaders researched live and compared (how they work, where things live)
 - [ ] 5. Pass 3: visual craft checked
 - [ ] 5b. Pass 4: taste checked, First impression filled
 - [ ] 6. Keeps named
@@ -135,14 +135,16 @@ Read `references/heuristics.md` and check every screen in scope against the 10 u
 
 **Independent reviewers.** If your tool can start subagents, run 2 or 3 reviewers with the same brief, screens and references, and never let one see another's notes. Merge their lists and record how many found each pain. If you cannot, write "Reviewers: 1" in the header.
 
-## Step 4b: Compare with the category leaders, and check where things live
+## Step 4b: Compare with the category leaders: how they work, and where things live
 
 Owners judge their app against the apps their users already know, and users expect it to work the same way. Read `references/conventions.md`.
 
-1. Name the category and 3 to 5 leaders. Search the web or open their sites when you can, and cite what you saw. Otherwise mark claims "from knowledge, not checked today".
-2. Fill the pain map's **Category conventions** table, at least 6 rows: what the leaders do, what this app does, and a verdict (Matches, a pain ID, or "Differs on purpose:" with the reason).
-3. Run the "where does it belong" checks (IA1 to IA6) on the navigation, the panels and Settings. Pains use the lens "Conventions: C1" or "IA: IA#".
-4. Features every leader has and this app lacks go in Missing.
+1. Name the category and 3 to 5 leaders.
+2. **Research them live. This is required when you have a web search or web fetch tool.** For each leader, open its help pages or product pages and read how the feature works today. Cite the URL and the date you checked in the **Source** column. "From knowledge, not checked today" is allowed only when no web tool exists, and then the header says "Competitor research: from knowledge, no web tool". Otherwise the header says "Competitor research: live, checked <date>".
+3. **Compare behavior, not only placement.** For every main feature the app has, research how 2 or more leaders handle it, with the 5 questions in C3: is it set once per account or per chat or item, how is it called up (a menu, "/", "@", a button, by itself), how does a result show and what happens before anything is sent or changed (a draft, then confirm), how do users create their own (with AI, import, a template), and what does it look like on phone.
+4. Fill the pain map's **Category conventions** table, at least 10 rows: Area, Kind ("Where it sits" or "How it works", at least 3 of these), what the leaders do, what this app does, Source, and a verdict (Matches, a pain ID, or "Differs on purpose:" with the reason). With a web tool, at least half the rows have a linked Source.
+5. Run the "where does it belong" checks (IA1 to IA6) on the navigation, the panels and Settings. Pains use the lens "Conventions: C1", "Conventions: C3" or "IA: IA#".
+6. Features the leaders have and this app lacks go in Missing, under **What leaders have that this app doesn't**, with the leaders named and linked.
 
 ## Step 5: Pass 3, visual craft
 
@@ -216,7 +218,8 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
 - [ ] Every script lead (visual V##, explore E##, existing results R##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
 - [ ] The header says "Used as a user: yes (N actions)" or "no". On yes, Left behind lists every action. On no, Not verified says "How features behave when used (switches, sending, results)".
-- [ ] Category conventions has at least 6 rows, each with a verdict.
+- [ ] Category conventions has at least 10 rows, each with a Kind, a Source and a verdict. At least 3 rows are "How it works". With a web tool, at least half the rows have a linked Source with the date checked, and the header says "Competitor research: live, checked <date>".
+- [ ] Missing has the part "What leaders have that this app doesn't", with the leaders named and linked, or "None found".
 - [ ] The header says how many controls were opened.
 - [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.
 - [ ] First impression has a score and a reason for T1 to T9, and a verdict.

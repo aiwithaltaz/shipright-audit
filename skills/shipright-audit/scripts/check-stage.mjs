@@ -41,7 +41,7 @@ export function check(md, dir = null) {
 
   if (/<[a-z][^>]*>/i.test(md.replace(/```[\s\S]*?```/g, ''))) errors.push('Template placeholders like <app name> are still in the file. Replace every one.');
   for (const s of SECTIONS) if (!sections[s]) errors.push(`Missing section "## ${s}".`);
-  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:', 'Phone coverage:', 'Used as a user:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
+  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:', 'Phone coverage:', 'Used as a user:', 'Competitor research:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
 
   // Taste pass: a score and a reason for each of T1 to T9, and a short verdict above the table.
   if (sections['First impression']) {
@@ -57,10 +57,29 @@ export function check(md, dir = null) {
   }
 
   const convIds = [];
+  // Competitor research: live (a web tool was used today) or from knowledge (no web tool exists).
+  const research = header.match(/Competitor research:\s*([^\n·|]*)/i);
+  const live = !!research && /\blive\b/i.test(research[1]);
+  if (research && !live && !(/from knowledge/i.test(research[1]) && /no web/i.test(research[1]))) errors.push('Header "Competitor research:" must read "live, checked <date>" or, only when no web search or fetch tool exists, "from knowledge, no web tool".');
+  const LINK = /https?:\/\/[^\s|)\]]+/i, DATE = /\b\d{4}-\d{2}-\d{2}\b/;
   // Category conventions: the app compared with the leaders its users already know.
   if (sections['Category conventions']) {
     const cc = table(sections['Category conventions']);
-    if (cc.rows.length < 6) errors.push(`Category conventions: ${cc.rows.length} row(s). Compare at least 6 areas with the category leaders (references/conventions.md).`);
+    if (cc.rows.length < 10) errors.push(`Category conventions: ${cc.rows.length} row(s). Compare at least 10 areas with the category leaders (references/conventions.md).`);
+    // How it works, not only where it sits: at least 3 rows compare behavior (references/conventions.md, C3).
+    if (col(cc, 'kind') < 0) errors.push('Category conventions: add a "Kind" column. Each row is "Where it sits" or "How it works".');
+    else {
+      const how = cc.rows.filter(r => /^how\b/i.test(cell(cc, r, 'kind'))).length;
+      if (how < 3) errors.push(`Category conventions: ${how} row(s) about how something works. Add at least 3 "How it works" rows: set once or per item, how it is called up, what happens before anything is sent, how users make their own, what it looks like on phone (references/conventions.md, C3).`);
+      cc.rows.forEach((r, i) => { if (!/^(how|where)\b/i.test(cell(cc, r, 'kind'))) errors.push(`Category conventions row ${i + 1} ("${r[0]}"): Kind must be "Where it sits" or "How it works".`); });
+    }
+    // Sources: with a web tool, at least half the rows cite the page that was opened and the date it was checked.
+    if (col(cc, 'source') < 0) errors.push('Category conventions: add a "Source" column: the URL you opened and the date you checked it, or "from knowledge, not checked today" when no web tool exists.');
+    else {
+      const linked = cc.rows.filter(r => LINK.test(cell(cc, r, 'source')) && DATE.test(cell(cc, r, 'source'))).length;
+      if (live && linked * 2 < cc.rows.length) errors.push(`Category conventions: ${linked} of ${cc.rows.length} row(s) have a linked Source with the date checked. With a web tool, at least half must (a URL and a date like 2026-11-12).`);
+      cc.rows.forEach((r, i) => { if (!cell(cc, r, 'source')) errors.push(`Category conventions row ${i + 1} ("${r[0]}"): Source is empty. Give the URL and the date checked, or "from knowledge, not checked today".`); });
+    }
     cc.rows.forEach((r, i) => {
       const v = (cell(cc, r, 'verdict') || r[r.length - 1] || '').trim();
       if (!/^matches\b/i.test(v) && !/\bP\d{2,}\b/.test(v) && !/^differs on purpose\W+\w+/i.test(v)) errors.push(`Category conventions row ${i + 1} ("${r[0]}"): verdict must be Matches, a pain ID, or "Differs on purpose:" with the reason.`);
@@ -120,8 +139,24 @@ export function check(md, dir = null) {
 
   for (const pid of convIds) if (!ids.has(pid)) errors.push(`Category conventions: ${pid} is not in Pains.`);
 
-  const missingRows = table(sections['Missing'] || []).rows;
-  if (sections['Missing'] && !missingRows.length && !/none found/i.test((sections['Missing'] || []).join('\n'))) errors.push('Missing: no rows. Check the page inventory and list what is missing, or write "None found" with what you checked.');
+  // The page inventory is the part of Missing above its first "###" heading.
+  const missingAll = sections['Missing'] || [], firstSub = missingAll.findIndex(l => /^###\s+/.test(l));
+  const missingMain = firstSub < 0 ? missingAll : missingAll.slice(0, firstSub);
+  const missingRows = table(missingMain).rows;
+  if (sections['Missing'] && !missingRows.length && !/none found/i.test(missingMain.join('\n'))) errors.push('Missing: no rows. Check the page inventory and list what is missing, or write "None found" with what you checked.');
+  // Missing also holds what the leaders have and this app does not, with the leaders named and linked.
+  if (sections['Missing']) {
+    const lines = sections['Missing'];
+    const at = lines.findIndex(l => /^###\s+/.test(l) && /what leaders have/i.test(l));
+    if (at < 0) errors.push('Missing: add the part "### What leaders have that this app doesn\'t", with the leaders named and linked, or "None found".');
+    else {
+      const rest = lines.slice(at + 1), end = rest.findIndex(l => /^###\s+/.test(l));
+      const part = end < 0 ? rest : rest.slice(0, end);
+      const rows = table(part).rows;
+      if (!rows.length && !/none found/i.test(part.join('\n'))) errors.push('Missing, "What leaders have that this app doesn\'t": list each feature with the leaders that have it, or write "None found".');
+      if (live) rows.forEach((r, i) => { if (!LINK.test(r.join(' '))) errors.push(`Missing, "What leaders have that this app doesn't" row ${i + 1} ("${r[0]}"): name the leaders and link the page that shows it.`); });
+    }
+  }
 
   const fix = table(sections['Fix map'] || []);
   const nowIds = [];
@@ -225,7 +260,7 @@ export function check(md, dir = null) {
 function selfTest() {
   const good = `# Pain map: Demo
 Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Controls opened: 12 of 14 · Reviewers: 1 · Method: crawl
-Phone coverage: 1 of 1 in-scope screens · Used as a user: no
+Phone coverage: 1 of 1 in-scope screens · Used as a user: no · Competitor research: live, checked 2026-10-23
 Scope: booking
 Out of scope: admin
 Context used: none given
@@ -246,14 +281,18 @@ It reads as a calm booking tool, but four equal stat cards compete with the book
 
 ## Category conventions
 Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
-| Area | What the leaders do | This app | Verdict |
-|---|---|---|---|
-| Sign in | Google sign-in | Email only | P02 |
-| First step | Pick a time first | Pick a time first | Matches |
-| Price | Shown before booking | Shown before booking | Matches |
-| Cancel | Link in email | Link in email | Matches |
-| Reminders | Text and email | Email | Differs on purpose: owner's clients prefer email |
-| Search | Search by service | Search by service | Matches |
+| Area | Kind | What the leaders do | This app | Source | Verdict |
+|---|---|---|---|---|---|
+| Sign in | Where it sits | Google sign-in on the first screen | Email only | https://example.com/leader-a/help/sign-in (checked 2026-10-23) | P02 |
+| First step | Where it sits | Pick a time first | Pick a time first | https://example.com/leader-a/help/book (checked 2026-10-23) | Matches |
+| Price | Where it sits | Shown before booking | Shown before booking | https://example.com/leader-b/pricing (checked 2026-10-23) | Matches |
+| Cancel | Where it sits | Link in email | Link in email | from knowledge, not checked today | Matches |
+| Reminders | How it works | Set once per account: text and email | Set once per account: email | https://example.com/leader-b/help/reminders (checked 2026-10-23) | Differs on purpose: owner's clients prefer email |
+| Search | Where it sits | Search by service | Search by service | from knowledge, not checked today | Matches |
+| Reschedule | How it works | A draft of the new time, then Confirm | Changes at once, no confirm | https://example.com/leader-c/help/reschedule (checked 2026-10-23) | P01 |
+| Booking page | How it works | Owners start from a template | Owners start from a template | https://example.com/leader-a/help/templates (checked 2026-10-23) | Matches |
+| Pick a service | How it works | A button on every page | A button on every page | from knowledge, not checked today | Matches |
+| Booking on phone | How it works | One step per screen | One step per screen | from knowledge, not checked today | Matches |
 
 ## Screens
 | Screen | Job | Primary action | Actions | States seen | Screenshot |
@@ -285,6 +324,11 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
 |---|---|---|
 | 404 | Lost users | |
 
+### What leaders have that this app doesn't
+| Feature | Leaders that have it | Pain ID |
+|---|---|---|
+| Add to calendar after booking | Leader A (https://example.com/leader-a/help/calendar), Leader B (https://example.com/leader-b/help/calendar) | |
+
 ## Fix map
 | ID | Fix A | Fix B | Chosen | Principle | Test that proves it | Impact | Confidence | Effort | Score | Now / Next / Later |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -314,10 +358,10 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     .replace('| T9 Area | 3 | fine but plain here |', '')
     .replace('| T8 Area | 3 | fine but plain here |', '| T8 Area | 7 | x |')
     .replace('Controls opened: 12 of 14 · ', '')
-    .replace('Phone coverage: 1 of 1 in-scope screens · Used as a user: no\n', '')
+    .replace('Phone coverage: 1 of 1 in-scope screens · Used as a user: no · Competitor research: live, checked 2026-10-23\n', '')
     .replace('screens/home-1280.png, screens/home-390.png |', 'screens/home-1280.png |')
-    .replace('| Reminders | Text and email | Email | Differs on purpose: owner\'s clients prefer email |', '| Reminders | Text and email | Email | Different |')
-    .replace('| Search | Search by service | Search by service | Matches |', '')
+    .replace('Differs on purpose: owner\'s clients prefer email |', 'Different |')
+    .replace('| Search | Where it sits | Search by service | Search by service | from knowledge, not checked today | Matches |', '')
     .replace('It reads as a calm booking tool, but four equal stat cards compete with the booking button. One clear focal point would help most.', '');
   // Folder checks: an undecided visual lead, a lead pointing at a missing pain, a vague rejection,
   // and a pain that cites a screenshot the crawl saved mid-load.
@@ -359,10 +403,26 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     ['a result lead from a walk must be decided', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n', d3).some(e => e.includes('W-send-1 not decided'))],
     ['a decided walk lead passes', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| W-send-1 | media | P01 |\n', d3).length === 0],
   );
+  // Competitor research: fewer than 10 rows, no Source column and no how-it-works rows each fail. A table
+  // that has them passes (the good pain map above). Without a web tool, "from knowledge" must say so.
+  const conv = good.split('## Category conventions')[1].split('## Screens')[0];
+  const swapConv = f => good.replace(conv, f(conv));
+  const dropCol = (t, n) => t.split('\n').map(l => { if (!l.startsWith('|')) return l; const c = l.split('|'); c.splice(n + 1, 1); return c.join('|'); }).join('\n');
+  const fromKnowledge = swapConv(t => t.replace(/https:\/\/example\.com\S* \(checked 2026-10-23\)/g, 'from knowledge, not checked today'));
+  cov.push(
+    ['conventions: fewer than 10 rows fails', check(swapConv(t => t.replace(/\| Booking on phone .*\n/, ''))).some(e => e.includes('Compare at least 10'))],
+    ['conventions: no Source column fails', check(swapConv(t => dropCol(t, 4))).some(e => e.includes('add a "Source" column'))],
+    ['conventions: no how-it-works rows fails', check(swapConv(t => t.replace(/\| How it works \|/g, '| Where it sits |'))).some(e => e.includes('0 row(s) about how something works'))],
+    ['conventions: with a web tool, too few linked sources fails', check(fromKnowledge).some(e => e.includes('0 of 10 row(s) have a linked Source'))],
+    ['conventions: from knowledge passes only when the header says there is no web tool', check(fromKnowledge.replace('Competitor research: live, checked 2026-10-23', 'Competitor research: from knowledge, no web tool').replace(/Leader A \(https[^)]*\), Leader B \(https[^)]*\)/, 'Leader A, Leader B')).length === 0],
+    ['conventions: a vague research line fails', check(good.replace('Competitor research: live, checked 2026-10-23', 'Competitor research: from knowledge')).some(e => e.includes('must read "live, checked'))],
+    ['missing: no "What leaders have" part fails', check(good.replace(/### What leaders have[\s\S]*?\n\n/, '\n')).some(e => e.includes('What leaders have that this app doesn'))],
+    ['missing: a leader with no link fails when research is live', check(good.replace(/Leader A \(https[^)]*\), Leader B \(https[^)]*\)/, 'Leader A, Leader B')).some(e => e.includes('name the leaders and link the page'))],
+  );
   const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
-  console.log(covFailed.length === 0 ? `PASS  phone coverage and used-as-a-user: ${cov.length} cases` : `FAIL  phone coverage and used-as-a-user: ${covFailed.join(', ')}`);
+  console.log(covFailed.length === 0 ? `PASS  0.7 header and research checks: ${cov.length} cases` : `FAIL  0.7 header and research checks: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
-  const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
+  const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'Competitor research:', 'verdict must be Matches', 'Compare at least 10', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);
