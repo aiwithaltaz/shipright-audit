@@ -285,3 +285,35 @@ export function widthsFlag(args, fallback = [1280, 390]) {
   return list.length ? [...new Set(list)] : fallback;
 }
 export const viewportFor = width => ({ width, height: width <= 500 ? 844 : 800 });
+
+// The in-page checks live in analyze-page.js, so an audit run by hand in a browser tool uses the same code.
+// This returns the text to hand to page.evaluate().
+let analyzeSrc = null;
+export function analyzeScript(opts = {}) {
+  analyzeSrc ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'analyze-page.js'), 'utf8');
+  return `(() => { ${analyzeSrc}\n return SHIPRIGHT_ANALYZE(${JSON.stringify(opts)}); })()`;
+}
+
+// One lead per problem: the same check with the same words (numbers aside) on several pages or widths
+// is one lead that lists them all. A lead seen at only one of the widths says so.
+export function mergeLeads(findings, widths, local = u => u) {
+  const leads = [];
+  for (const f of findings) {
+    const key = f.kind + '|' + (f.group || String(f.what).replace(/\d+/g, '#'));
+    const have = leads.find(l => l.key === key);
+    const where = local(f.page);
+    if (have) {
+      if (!have.pages.includes(where)) have.pages.push(where);
+      if (f.width && !have.widths.includes(f.width)) have.widths.push(f.width);
+      if (f.shot) have.shots.push(f.shot);
+      continue;
+    }
+    leads.push({ key, id: f.id, kind: f.kind, what: f.what, detail: f.detail, pages: [where], widths: f.width ? [f.width] : [], shots: f.shot ? [f.shot] : [], shot: f.shot || null });
+  }
+  for (const l of leads) {
+    l.widths.sort((a, b) => b - a);
+    if (widths.length > 1 && l.widths.length === 1) l.what += ` (at ${l.widths[0]} wide only)`;
+    if (!l.shot && l.shots.length) l.shot = l.shots[0];
+  }
+  return leads.map(({ key, ...l }) => l);
+}

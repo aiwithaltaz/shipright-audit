@@ -74,8 +74,31 @@ if (hasPw) {
   ok(`visual checker finds all ${want.length} planted kinds after a slow load`, lost.length === 0, lost.length ? `missed ${lost.join(', ')}` : `${kinds.size} kinds`);
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
-  const noise = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8')).findings.length;
+  const busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
+  const noise = busy.findings.filter(f => f.width === 1280).length;
   ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
+  // At 390 the only lead is the one the answer key lists for this app: tables wider than a phone screen.
+  const phoneLeads = busy.leads.filter(l => l.widths.includes(390));
+  ok('visual checker at 390: only the sideways tables the answer key lists', phoneLeads.length === 1 && phoneLeads[0].kind === 'clipped-text' && phoneLeads[0].detail.how === 'screen' && phoneLeads[0].pages.every(p => /#\/(shifts|volunteers)$/.test(p)), phoneLeads.map(l => `${l.kind} on ${l.pages.join(', ')}`).join(' | ') || 'none');
+  // 8b. Clipped text: a reply footer cut off at 390 and fine at 1280 is one lead, at 390 only.
+  // The same page holds things that must not be flagged: long chat titles shortened in a list, a row
+  // of buttons that scrolls sideways, a code block, and a label only screen readers see.
+  const pout = mkdtempSync(join(tmpdir(), 'visual-phone-'));
+  run(['skills/shipright-audit/scripts/visual.mjs', 'tests/fixtures/phone-app/index.html', '--out', pout]);
+  const pl = JSON.parse(readFileSync(join(pout, 'visual.json'), 'utf8')).leads;
+  const clip = pl.filter(l => l.kind === 'clipped-text');
+  ok('clipped text: a reply footer cut off on phone is one lead, at 390 only', clip.length === 1 && clip[0].widths.join() === '390' && /cost 0\.4 cents/.test(clip[0].what) && /at 390 wide only/.test(clip[0].what) && !!clip[0].shot && pl.length === 1, pl.map(l => `${l.kind} @${l.widths.join('+')}: ${l.what.slice(0, 60)}`).join(' | ') || 'no leads');
+  // 8c. No clipped-text false alarms on the other fixtures. (visual-app is three fixed columns, so on a
+  // phone its page is wider than the screen: that one lead is true, and it is the only one.)
+  const falseAlarms = [];
+  for (const f of ['mini-app', 'gated-app', 'explore-app', 'visual-app']) {
+    const o = mkdtempSync(join(tmpdir(), 'clip-'));
+    run(['skills/shipright-audit/scripts/visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o]);
+    const cl = JSON.parse(readFileSync(join(o, 'visual.json'), 'utf8')).leads.filter(l => l.kind === 'clipped-text');
+    const allowed = f === 'visual-app' ? cl.filter(l => !(l.detail.how === 'screen' && l.widths.join() === '390')) : cl;
+    if (allowed.length || (f === 'visual-app' && cl.length !== 1)) falseAlarms.push(`${f}: ${cl.map(l => l.what.slice(0, 50)).join('; ')}`);
+  }
+  ok('clipped text: no false alarms on the existing fixtures', falseAlarms.length === 0, falseAlarms.join(' | ') || '4 fixtures');
   // 9. Login wall and session: without a session the gated app is a wall; with one the crawl gets in
   const sess = join(mkdtempSync(join(tmpdir(), 'sess-')), 'session.json');
   writeFileSync(sess, JSON.stringify({ cookies: [{ name: 'sr_test', value: '1', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' }], origins: [] }));

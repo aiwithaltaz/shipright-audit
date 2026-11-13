@@ -5,7 +5,11 @@
 // and style inventory visual.mjs writes (minus the crop screenshots, which you take yourself).
 // Thresholds are CSS pixels at 1280 wide: 6px is the smallest misalignment people notice side by side;
 // 40px is a gap that reads as "empty" in a card.
-var SHIPRIGHT_ANALYZE = () => {
+// Run it at 1280 wide and again at 390 wide: clipped text and sideways overflow mostly show on phone.
+// Options (all optional), for the scripts:
+//   within  a CSS selector: the text checks only look inside matching elements (an open menu or dialog)
+//   only    a list of lead kinds to keep, for example ['clipped-text']
+var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const ALIGN_PX = 6, GAP_MIN = 40, GAP_RATIO = 2.5, PILL_WORDS = 4, PILL_CHARS = 30, PILLS_PER_CARD = 4;
   // A card's only worded action is buried when 10+ lines of text sit between the title and it.
   // A card is overloaded when it carries more than 7 small labels and pills to read.
@@ -19,6 +23,14 @@ var SHIPRIGHT_ANALYZE = () => {
   const tag = el => { if (!el.dataset.srv) el.dataset.srv = 'm' + (++mark); return el.dataset.srv; };
   const findings = [];
   const add = (f, el) => findings.push({ ...f, mark: el ? tag(el) : null });
+  // Visible to a person: also false when an ancestor is faded out (opacity does not inherit).
+  const shown = el => {
+    if (!vis(el)) return false;
+    if (el.checkVisibility) return el.checkVisibility({ opacityProperty: true, visibilityProperty: true, checkOpacity: true, checkVisibilityCSS: true });
+    for (let x = el; x && x !== document.documentElement; x = x.parentElement) if (Number(getComputedStyle(x).opacity) < 0.05) return false;
+    return true;
+  };
+  const inScope = el => !opts.within || !!el.closest(opts.within);
 
   // Pills: small, fully rounded, filled or outlined chips with text.
   const isPill = el => {
@@ -139,6 +151,88 @@ var SHIPRIGHT_ANALYZE = () => {
     }
   }
 
+  // Clipped text: words a person cannot read in full. Either the box that holds them hides what
+  // overflows it (overflow hidden, with or without "..."), or they run past the edge of the screen.
+  // Text counts as cut when at least 12px of it shows and more than 2px of it is hidden: fully hidden
+  // text (the next slide, a closed drawer, screen-reader-only labels) is not "cut off".
+  // Not flagged: rows that are meant to scroll sideways (code, tables, tab rows, any row of buttons or
+  // links, anything with a visible scrollbar or a fade mask), and long titles shortened with "..." in a
+  // list of links (chat history, file lists), which is a normal pattern.
+  {
+    const CLIP_PX = 2, CLIP_SEEN = 12;
+    const vw = document.documentElement.clientWidth;
+    // The nearest ancestor that clips what overflows it sideways. Fixed boxes escape every ancestor;
+    // absolute boxes escape ancestors that are not positioned.
+    const clipHost = node => {
+      let skip = false;
+      for (let el = node.parentElement; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+        const cs = getComputedStyle(el);
+        if (!skip || cs.position !== 'static') {
+          skip = false;
+          if (cs.overflowX !== 'visible') return { el, cs, scrolls: cs.overflowX === 'auto' || cs.overflowX === 'scroll' };
+        }
+        if (cs.position === 'fixed') return null;
+        if (cs.position === 'absolute') skip = true;
+      }
+      return null;
+    };
+    const meantToScroll = (host, p) => {
+      if (host.el.scrollWidth - host.el.clientWidth <= CLIP_PX) return false;
+      if (host.el.matches('pre, code, table, [role=tablist], [role=table], [role=grid]') || p.closest('pre, code, table, [role=tablist]')) return true;
+      const bar = host.el.offsetHeight - host.el.clientHeight - parseFloat(host.cs.borderTopWidth) - parseFloat(host.cs.borderBottomWidth);
+      if (bar > 2) return true;
+      if ((host.cs.maskImage && host.cs.maskImage !== 'none') || (host.cs.webkitMaskImage && host.cs.webkitMaskImage !== 'none')) return true;
+      return !!host.el.querySelector('a[href], button, input, [role=button], [role=tab], [role=option], [role=link]');
+    };
+    const moving = el => { try { return el.getAnimations({ subtree: true }).some(a => a.playState === 'running'); } catch { return false; } };
+    const groups = new Map();
+    const range = document.createRange();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t.length < 2) continue;
+      const p = n.parentElement;
+      if (!p || p.closest('script, style, noscript, template, select, textarea, [aria-hidden="true"]') || !inScope(p) || !shown(p)) continue;
+      range.selectNodeContents(n);
+      const r = range.getBoundingClientRect();
+      if (r.width < 4 || r.height < 6) continue;
+      const host = clipHost(n);
+      // With no clipping ancestor the screen is the edge. Measure from the page's left edge, so a page
+      // that happens to be scrolled sideways gives the same answer.
+      let left = -scrollX, right = vw - scrollX, how = 'screen';
+      if (host) {
+        const hr = host.el.getBoundingClientRect();
+        if (hr.width < 24 || hr.height < 8 || hr.right <= 0 || hr.left >= vw) continue;
+        left = hr.left + parseFloat(host.cs.borderLeftWidth); right = left + host.el.clientWidth;
+        if (host.scrolls) { if (meantToScroll(host, p)) continue; how = 'scroll'; }
+        else how = host.cs.textOverflow === 'ellipsis' ? 'dots' : 'box';
+      }
+      const hidden = Math.max(r.right - right, left - r.left);
+      const seen = Math.min(r.right, right) - Math.max(r.left, left);
+      if (hidden <= CLIP_PX || seen < CLIP_SEEN) continue;
+      if (host && moving(host.el)) continue; // a ticker or a slide in motion
+      if (how === 'dots') {
+        const item = p.closest('a, button, [role=option], [role=menuitem], [role=tab], [role=link], [role=treeitem]');
+        const scope = item && (item.parentElement?.parentElement || item.parentElement);
+        if (scope && [...scope.querySelectorAll(item.tagName)].filter(x => sig(x) === sig(item)).length >= 3) continue;
+      }
+      let el = host && !host.scrolls && host.el.getBoundingClientRect().height <= 400 ? host.el : p;
+      // Past the screen edge: crop the widest thing that sticks out (the table, not one cell), and
+      // report one lead per page, because it is one problem: the page is wider than the screen.
+      if (how === 'screen') while (el.parentElement && el.parentElement !== document.body && el.parentElement.getBoundingClientRect().right > right + CLIP_PX && el.parentElement.getBoundingClientRect().height <= 1200) el = el.parentElement;
+      const key = how === 'screen' ? 'screen' : how + '|' + sig(host ? host.el : p);
+      const g = groups.get(key) || { how, el, texts: [], hidden: 0 };
+      if (!g.texts.includes(t)) g.texts.push(t);
+      g.hidden = Math.max(g.hidden, Math.round(hidden));
+      groups.set(key, g);
+    }
+    const HOW = { dots: 'Text is shortened with "..."', box: 'Text is cut off at the edge of its box', scroll: 'Text is cut off, and nothing shows that the line scrolls sideways', screen: 'Text runs past the edge of the screen' };
+    for (const [key, g] of groups) {
+      const more = g.texts.length - 1;
+      add({ kind: 'clipped-text', group: key, what: `${HOW[g.how]}: "${g.texts[0].slice(0, 90)}"${more ? ` (and ${more} more like it)` : ''}`, detail: { how: g.how, hidden_px: g.hidden, texts: g.texts.slice(0, 5), count: g.texts.length, screen_width: vw } }, g.el);
+    }
+  }
+
   // Corner scale: what radius do cards and buttons use?
   const rounded = [...groups.flatMap(g => g.items), ...document.querySelectorAll('button, input, select, textarea, [role=button]')]
     .filter(vis).map(el => ({ el, r: radius(el), h: el.getBoundingClientRect().height })).filter(x => x.r < x.h / 2 - 1);
@@ -179,5 +273,6 @@ var SHIPRIGHT_ANALYZE = () => {
   };
   const main = document.querySelector('main') || document.body;
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
-  return { findings, medianRadius, scale, counts, empty, style, title: document.title };
+  const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
+  return { findings: kept, medianRadius, scale, counts, empty, style, title: document.title, width: document.documentElement.clientWidth };
 };

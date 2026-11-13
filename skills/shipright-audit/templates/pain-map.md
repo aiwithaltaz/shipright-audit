@@ -1,6 +1,7 @@
 # Pain map: <app name>
 
 Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Controls opened: <n of m> · Reviewers: <n> · Method: <crawl / by hand / screenshots> · Widths seen: <390, 1280, or the width you actually saw> · Data: <realistic / sparse / empty>
+Phone coverage: <x of y> in-scope screens
 Scope: <the core tasks audited>
 Out of scope: <what was not audited>
 Context used: <users, business goal, analytics, owner complaints: or "none given">
@@ -23,7 +24,9 @@ Context used: <users, business goal, analytics, owner complaints: or "none given
 
 ## Screens
 
-| Screen | Job | Primary action | Actions | States seen | Screenshot |
+Every screen needs its 1280 and its 390 screenshot. A screen you could not see at 390 goes in Not verified by name.
+
+| Screen | Job | Primary action | Actions | States seen | Screenshots (1280 and 390) |
 |---|---|---|---|---|---|
 
 ## Task walks

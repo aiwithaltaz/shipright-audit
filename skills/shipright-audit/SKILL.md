@@ -82,16 +82,18 @@ If the owner gives instructions at any point (what to skip, what is allowed), fo
 - **By hand when the scripts cannot reach the site** (for example an app only the owner's own browser is signed in to): use a browser tool, visit each screen at 1280 and 390 and save each screenshot into `<audit>/screens/`. Paste `<skill>/scripts/analyze-page.js` into the tool's JavaScript runner followed by `JSON.stringify(SHIPRIGHT_ANALYZE())` on each main page: it runs the same checks as `visual.mjs`. Do Step 1b by hand with the same rules. Say in the header that the audit ran by hand.
 - If no browser can be used at all, visit what you can, record the width you actually saw, and put any width you did not see in Not verified.
 
-Done when you can list every screen in scope.
+Done when you can list every screen in scope, each with its 1280 and its 390 screenshot. Count them for the header: "Phone coverage: X of Y in-scope screens". A screen with no 390 screenshot goes in Not verified by name.
 
 ## Step 1b: Open every safe control
 
 Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/explore`.
 
+- It runs at 1280 and at 390 wide (`--widths 1280,390` is the default). At 390 it explores the controls that only exist on phone and opens again whatever opened a dialog, menu or panel, so each one is seen on phone too. Text cut off inside what opened is a lead.
+
 - It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
 - Read `explore.md`. Open the **not clicked** controls yourself when the name makes the effect clear and it cannot save, send or spend: a dialog that asks before it saves is safe to open and close. Look inside everything that opened: the confusing part is often the panel, not the button.
 - Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
-- Put the totals in the header: "Controls opened: N of M".
+- Put the totals in the header: "Controls opened: N of M". `explore.md` prints the line to copy.
 
 ## Step 2: Name the core tasks
 
@@ -129,7 +131,7 @@ Owners judge their app against the apps their users already know, and users expe
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
-1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, and counts with nothing behind them. It opens menus but never clicks risky words. The same problem on several pages is one lead.
+1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
 2. Open `visual.md`, `explore.md` and each crop. **Decide every lead** (V## and E##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
 3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
 4. Cite the crop or the full screenshot as evidence.
@@ -198,6 +200,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Every script lead (visual and explore) is decided in Script leads: a pain ID, or Rejected with a reason.
 - [ ] Category conventions has at least 6 rows, each with a verdict.
 - [ ] The header says how many controls were opened.
+- [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.
 - [ ] First impression has a score and a reason for T1 to T9, and a verdict.
 - [ ] No pain rests on a screenshot the crawl saved mid-load, unless loading is the pain.
 - [ ] No duplicate pains, and one problem per row.

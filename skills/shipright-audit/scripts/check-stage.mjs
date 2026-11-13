@@ -41,7 +41,7 @@ export function check(md, dir = null) {
 
   if (/<[a-z][^>]*>/i.test(md.replace(/```[\s\S]*?```/g, ''))) errors.push('Template placeholders like <app name> are still in the file. Replace every one.');
   for (const s of SECTIONS) if (!sections[s]) errors.push(`Missing section "## ${s}".`);
-  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
+  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:', 'Phone coverage:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
 
   // Taste pass: a score and a reason for each of T1 to T9, and a short verdict above the table.
   if (sections['First impression']) {
@@ -72,6 +72,21 @@ export function check(md, dir = null) {
 
   const screens = table(sections['Screens'] || []);
   if (!screens.rows.length) errors.push('Screens: no rows. List every screen in scope.');
+  // Phone coverage: every screen in scope was seen at 390 wide, or Not verified names it.
+  const PHONE_SHOT = /[\w./-]*(?:phone|390)[\w.-]*\.(?:png|jpe?g|webp)\b/i;
+  const notVerifiedText = (sections['Not verified'] || []).join('\n').toLowerCase();
+  const phoneShots = [];
+  let onPhone = 0;
+  for (const r of screens.rows) {
+    const shot = r.join(' | ').match(PHONE_SHOT);
+    if (shot) { onPhone++; phoneShots.push([r[0], shot[0]]); }
+    else if (!r[0] || !notVerifiedText.includes(r[0].toLowerCase())) errors.push(`Screens "${r[0]}": has no 390 screenshot. Add its phone screenshot (for example screens/s03-phone.png), or name the screen in Not verified.`);
+  }
+  const coverage = header.match(/Phone coverage:\s*(\d+)\s+of\s+(\d+)/i);
+  if (header.includes('Phone coverage:')) {
+    if (!coverage) errors.push('Header "Phone coverage:" must read "X of Y in-scope screens".');
+    else if (screens.rows.length && (Number(coverage[1]) !== onPhone || Number(coverage[2]) !== screens.rows.length)) errors.push(`Header says "Phone coverage: ${coverage[1]} of ${coverage[2]}", but Screens lists ${screens.rows.length} screen(s) and ${onPhone} with a 390 screenshot. Write "Phone coverage: ${onPhone} of ${screens.rows.length} in-scope screens".`);
+  }
 
   const walks = table(sections['Task walks'] || []);
   if (walks.rows.length < 3) errors.push(`Task walks: ${walks.rows.length} row(s). Walk at least 3 core tasks.`);
@@ -134,6 +149,7 @@ export function check(md, dir = null) {
         if (!onDisk.has(basename(shot))) errors.push(`Pains ${r[0]}: screenshot ${shot} does not exist. Cite a file you saved, or move the claim to Not verified.`);
       }
     }
+    for (const [screen, shot] of phoneShots) if (!onDisk.has(basename(shot))) errors.push(`Screens "${screen}": 390 screenshot ${shot} does not exist. Cite a file you saved, or name the screen in Not verified.`);
   }
 
   if (dir) {
@@ -184,6 +200,7 @@ export function check(md, dir = null) {
 function selfTest() {
   const good = `# Pain map: Demo
 Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Controls opened: 12 of 14 · Reviewers: 1 · Method: crawl
+Phone coverage: 1 of 1 in-scope screens
 Scope: booking
 Out of scope: admin
 Context used: none given
@@ -216,7 +233,7 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
 ## Screens
 | Screen | Job | Primary action | Actions | States seen | Screenshot |
 |---|---|---|---|---|---|
-| Home | Start | Book | 4 | default | screens/home-1280.png |
+| Home | Start | Book | 4 | default | screens/home-1280.png, screens/home-390.png |
 
 ## Task walks
 | Task | Business goal | Steps | Screens | Dead ends | Where it broke |
@@ -271,6 +288,8 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     .replace('| T9 Area | 3 | fine but plain here |', '')
     .replace('| T8 Area | 3 | fine but plain here |', '| T8 Area | 7 | x |')
     .replace('Controls opened: 12 of 14 · ', '')
+    .replace('Phone coverage: 1 of 1 in-scope screens\n', '')
+    .replace('screens/home-1280.png, screens/home-390.png |', 'screens/home-1280.png |')
     .replace('| Reminders | Text and email | Email | Differs on purpose: owner\'s clients prefer email |', '| Reminders | Text and email | Email | Different |')
     .replace('| Search | Search by service | Search by service | Matches |', '')
     .replace('It reads as a calm booking tool, but four equal stat cards compete with the booking button. One clear focal point would help most.', '');
@@ -288,12 +307,22 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
   const dirGood = check(good + ledger.replace('| V03 | menu | P09 |', '| V03 | menu | P02 |\n| V04 | count | Rejected: the badge counts all drafts, as labeled |'), d);
   console.log(dirMissed.length === 0 ? `PASS  folder checks caught all ${dirExpect.length} problems` : `FAIL  folder checks missed: ${dirMissed.join(', ')}`);
   console.log(dirGood.length === 0 ? 'PASS  a complete ledger passes' : `FAIL  complete ledger: ${dirGood.join(' | ')}`);
+  // Phone coverage: a wrong count fails, a missing 390 file fails, and a screen named in Not verified passes.
+  const twoScreens = good.replace('| Home | Start | Book | 4 | default | screens/home-1280.png, screens/home-390.png |', '| Home | Start | Book | 4 | default | screens/home-1280.png, screens/home-390.png |\n| Admin | Manage | Add | 9 | default | screens/admin-1280.png |');
+  const cov = [
+    ['a screen with no 390 screenshot fails', check(twoScreens.replace('Phone coverage: 1 of 1', 'Phone coverage: 1 of 2')).some(e => e.includes('"Admin": has no 390 screenshot'))],
+    ['a screen named in Not verified passes', check(twoScreens.replace('Phone coverage: 1 of 1', 'Phone coverage: 1 of 2').replace('- Screen reader behavior', '- Screen reader behavior\n- Admin at 390 wide: the page needs a role this account does not have')).length === 0],
+    ['a wrong coverage count fails', check(good.replace('Phone coverage: 1 of 1', 'Phone coverage: 6 of 6')).some(e => e.includes('Write "Phone coverage: 1 of 1'))],
+    ['a 390 screenshot that is not on disk fails', check(good.replace('screens/home-390.png |', 'screens/gone-390.png |'), d).some(e => e.includes('gone-390.png does not exist'))],
+  ];
+  const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
+  console.log(covFailed.length === 0 ? `PASS  phone coverage: ${cov.length} cases` : `FAIL  phone coverage: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
-  const expect = ['Controls opened:', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
+  const expect = ['Controls opened:', 'Phone coverage:', 'has no 390 screenshot', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);
-  process.exit(g.length === 0 && missing.length === 0 && dirMissed.length === 0 && dirGood.length === 0 ? 0 : 1);
+  process.exit(g.length === 0 && missing.length === 0 && dirMissed.length === 0 && dirGood.length === 0 && covFailed.length === 0 ? 0 : 1);
 }
 
 // Compare as file URLs so this also runs on Windows (D:\\... vs file:///D:/...).
