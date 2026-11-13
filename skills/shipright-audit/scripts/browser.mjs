@@ -317,3 +317,15 @@ export function mergeLeads(findings, widths, local = u => u) {
   }
   return leads.map(({ key, ...l }) => l);
 }
+
+// The pattern a link shares with its siblings in a list of items: "/chat/abc" and "/chat/xyz" are both
+// "/chat/*". Works for paths, hash routes ("#/chat/abc") and id queries ("?id=7"). Top-level pages
+// ("/settings") have no pattern: they are places, not items.
+export function linkPattern(u) {
+  let x; try { x = new URL(u); } catch { return null; }
+  const hashRoute = x.hash.startsWith('#/');
+  const segs = (hashRoute ? x.hash.slice(1) : x.pathname).split('/').filter(Boolean);
+  if (segs.length >= 2) return `${hashRoute ? x.pathname + '#' : ''}/${segs.slice(0, -1).join('/')}/*`;
+  const idKey = [...x.searchParams.keys()].find(k => /^(id|c|chat|conversation|thread|item|file|doc|document|project|p|q)$/i.test(k));
+  return idKey ? `${x.pathname}?${idKey}=*` : null;
+}

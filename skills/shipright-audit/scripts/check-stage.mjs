@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Check a pain map against the shipright-audit gate. Every failure names the row and the field to fix.
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
-// When the audit folder holds visual/visual.json or explore/explore.json, every lead must be listed in "## Script leads"
+// When the audit folder holds visual/visual.json, explore/explore.json or samples/samples.json, every lead must be listed in "## Script leads"
 // as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
 // a pain may not cite that screen's screenshot.
 //        node <skill>/scripts/check-stage.mjs --self-test
@@ -156,7 +156,7 @@ export function check(md, dir = null) {
     const find = (d, name, depth = 0) => { if (depth > 3 || !existsSync(d)) return null; for (const n of readdirSync(d)) { const p = join(d, n); if (n === name) return p; if (statSync(p).isDirectory()) { const f = find(p, name, depth + 1); if (f) return f; } } return null; };
     // Script leads ledger: no lead a script measured may vanish without a decision.
     let leads = [];
-    for (const name of ['visual.json', 'explore.json']) {
+    for (const name of ['visual.json', 'explore.json', 'samples.json']) {
       const f = find(dir, name);
       if (!f) continue;
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || v.findings || []).map(l => l.id)); } catch {}
@@ -296,15 +296,16 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
   // Folder checks: an undecided visual lead, a lead pointing at a missing pain, a vague rejection,
   // and a pain that cites a screenshot the crawl saved mid-load.
   const d = mkdtempSync(join(tmpdir(), 'gate-'));
-  for (const sub of ['screens', 'visual']) mkdirSync(join(d, sub));
+  for (const sub of ['screens', 'visual', 'samples']) mkdirSync(join(d, sub));
   for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png', 'screens/s05-desktop.png']) writeFileSync(join(d, f), '');
   writeFileSync(join(d, 'visual/visual.json'), JSON.stringify({ leads: [{ id: 'V01' }, { id: 'V02' }, { id: 'V03' }, { id: 'V04' }] }));
+  writeFileSync(join(d, 'samples/samples.json'), JSON.stringify({ leads: [{ id: 'R01' }] }));
   writeFileSync(join(d, 'screens/crawl.json'), JSON.stringify({ unsettled: ['s05'] }));
   const ledger = '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| V01 | pill | P01 |\n| V02 | gap | Rejected: the gap holds a chart that loads later |\n| V03 | menu | P09 |\n';
   const withDir = check(good.replace('Book step 4, screens/book-1280.png', 'Book step 4, screens/s05-desktop.png') + ledger.replace('| V02 | gap | Rejected: the gap holds a chart that loads later |', '| V02 | gap | Rejected: fine |'), d);
-  const dirExpect = ['V04 not decided', 'P09 is not in Pains', 'V02: decision must be', 's05 was still loading'];
+  const dirExpect = ['V04, R01 not decided', 'P09 is not in Pains', 'V02: decision must be', 's05 was still loading'];
   const dirMissed = dirExpect.filter(e => !withDir.some(x => x.includes(e)));
-  const dirGood = check(good + ledger.replace('| V03 | menu | P09 |', '| V03 | menu | P02 |\n| V04 | count | Rejected: the badge counts all drafts, as labeled |'), d);
+  const dirGood = check(good + ledger.replace('| V03 | menu | P09 |', '| V03 | menu | P02 |\n| V04 | count | Rejected: the badge counts all drafts, as labeled |\n| R01 | media | P01 |'), d);
   console.log(dirMissed.length === 0 ? `PASS  folder checks caught all ${dirExpect.length} problems` : `FAIL  folder checks missed: ${dirMissed.join(', ')}`);
   console.log(dirGood.length === 0 ? 'PASS  a complete ledger passes' : `FAIL  complete ledger: ${dirGood.join(' | ')}`);
   // Phone coverage: a wrong count fails, a missing 390 file fails, and a screen named in Not verified passes.

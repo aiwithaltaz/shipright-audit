@@ -23,6 +23,7 @@ Audit progress:
 - [ ] 0. Started: one line to the owner, tools ready, door checked
 - [ ] 1. Every screen reached, signed in and signed out
 - [ ] 1b. Every safe control opened
+- [ ] 1c. Existing results opened (read-only)
 - [ ] 2. Core tasks named
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
@@ -95,6 +96,17 @@ Audits miss what they never open: a dialog behind an icon, a button that does no
 - Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
 - Put the totals in the header: "Controls opened: N of M". `explore.md` prints the line to copy.
 
+## Step 1c: Open existing results (read-only)
+
+The owner's own data is the best test data. A generated image that never shows, a reply footer cut off on phone, a row of unnamed icons under an answer: these only appear on a page that holds a real result, and an audit that only looks at empty screens never sees them. Execute `node <skill>/scripts/samples.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/samples`.
+
+- It finds item lists (past chats, library, projects, files: links in a navigation, side panel, list or table that share a pattern), opens up to 5 items per list (`--samples N`), and prefers items whose page holds images, files, code, artifacts, or tool and connector results.
+- On each item, at 1280 and 390, it scrolls through, saves a full-page screenshot and runs the page checks plus the result checks: **media that never loaded** (a broken image, a dead video, a "click to load image" placeholder where the media should be), **clipped text**, and **action buttons with no name**.
+- It is read-only: it opens each item by its address and scrolls. It never clicks or types. Do the same by hand: never click inside a result, except to open it.
+- Read `samples.md` and look at every `R-*.png` page screenshot yourself: does the result look right, at both widths? Scripts cannot judge that.
+- Its leads are **R##**. Decide each one in **Script leads**, like V## and E##.
+- If it finds no item lists (items opened by buttons, not links), open 3 to 5 past items by hand at both widths and say so in the header. If the account has no past items, write that in Not verified.
+
 ## Step 2: Name the core tasks
 
 From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. Write each as a user goal ("Register a family of 4"), not a feature ("Use the form"). Note the business goal each task serves.
@@ -132,7 +144,7 @@ Owners judge their app against the apps their users already know, and users expe
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
 1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
-2. Open `visual.md`, `explore.md` and each crop. **Decide every lead** (V## and E##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
+2. Open `visual.md`, `explore.md`, `samples.md` and each crop. **Decide every lead** (V##, E## and R##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
 3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
 4. Cite the crop or the full screenshot as evidence.
 
@@ -197,7 +209,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
-- [ ] Every script lead (visual and explore) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] Every script lead (visual V##, explore E##, existing results R##) is decided in Script leads: a pain ID, or Rejected with a reason.
 - [ ] Category conventions has at least 6 rows, each with a verdict.
 - [ ] The header says how many controls were opened.
 - [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.

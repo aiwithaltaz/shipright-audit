@@ -9,6 +9,8 @@
 // Options (all optional), for the scripts:
 //   within  a CSS selector: the text checks only look inside matching elements (an open menu or dialog)
 //   only    a list of lead kinds to keep, for example ['clipped-text']
+//   results true on a page that shows a result (a past chat, a file, a reply to a test message): also
+//           counts action buttons that have no name at all
 var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const ALIGN_PX = 6, GAP_MIN = 40, GAP_RATIO = 2.5, PILL_WORDS = 4, PILL_CHARS = 30, PILLS_PER_CARD = 4;
   // A card's only worded action is buried when 10+ lines of text sit between the title and it.
@@ -231,6 +233,40 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
       const more = g.texts.length - 1;
       add({ kind: 'clipped-text', group: key, what: `${HOW[g.how]}: "${g.texts[0].slice(0, 90)}"${more ? ` (and ${more} more like it)` : ''}`, detail: { how: g.how, hidden_px: g.hidden, texts: g.texts.slice(0, 5), count: g.texts.length, screen_width: vw } }, g.el);
     }
+  }
+
+  // Media that never loaded: an image the browser gave up on, a video with nothing to play, or a
+  // placeholder that makes the user press "load image" before anything shows.
+  {
+    const TRACKER = /pixel|track|beacon|analytics|collect|\.gif\?/i, SVG = /\.svg(\?|#|$)|^data:image\/svg/i;
+    const hiddenBy = el => { const st = getComputedStyle(el); return st.display === 'none' || st.visibility === 'hidden'; };
+    const label = el => (el.getAttribute('alt') || '').trim() || ((el.currentSrc || el.getAttribute('src') || '').split(/[?#]/)[0].split('/').pop() || 'no name').slice(0, 60);
+    const broken = [...document.querySelectorAll('img')].filter(img => {
+      const src = img.currentSrc || img.getAttribute('src') || '';
+      if (!src || SVG.test(src) || TRACKER.test(src) || !inScope(img) || hiddenBy(img)) return false;
+      if (Number(img.getAttribute('width')) === 1 || Number(img.getAttribute('height')) === 1) return false;
+      return img.complete && img.naturalWidth === 0;
+    });
+    if (broken.length) add({ kind: 'media-not-loaded', group: 'broken-image', what: `An image did not load: "${label(broken[0])}"${broken.length > 1 ? ` (and ${broken.length - 1} more)` : ''}`, detail: { how: 'broken image', images: broken.slice(0, 5).map(label), count: broken.length } }, broken[0].getBoundingClientRect().width > 8 ? broken[0] : broken[0].parentElement);
+    const dead = [...document.querySelectorAll('video')].filter(v => inScope(v) && !hiddenBy(v) && (v.error || (v.networkState === 3 && (v.getAttribute('src') || v.querySelector('source')))));
+    if (dead.length) add({ kind: 'media-not-loaded', group: 'broken-video', what: `A video did not load${dead.length > 1 ? ` (${dead.length} on this page)` : ''}`, detail: { how: 'broken video', count: dead.length } }, dead[0]);
+    const LOAD = /\b(click|tap|press)( here)? to load\b|\b(click|tap|press)( here)? to (show|see|reveal|display) (the |this )?(image|photo|picture|video|media|preview|attachment)|^(load|show|reveal|display) (the |this )?(image|images|photo|picture|video|media|preview|attachment)s?$/i;
+    const loaders = [...document.querySelectorAll('button, [role=button], a')].filter(b => inScope(b) && shown(b) && LOAD.test((text(b) || b.getAttribute('aria-label') || '').slice(0, 60)));
+    if (loaders.length) { const name = text(loaders[0]) || loaders[0].getAttribute('aria-label'); add({ kind: 'media-not-loaded', group: 'load-button|' + name.toLowerCase(), what: `Media does not show until the user presses "${name}"${loaders.length > 1 ? ` (${loaders.length} on this page)` : ''}`, detail: { how: 'load button', button: name, count: loaders.length } }, loaders[0].parentElement && loaders[0].parentElement.getBoundingClientRect().height <= 500 ? loaders[0].parentElement : loaders[0]); }
+  }
+
+  // On a result page: action buttons with no name at all. No visible words, no label for screen
+  // readers, no tooltip text and no named icon inside, so nobody can tell what they do before pressing.
+  if (opts.results) {
+    const named = el => {
+      if (/[\p{L}\p{N}]/u.test(text(el))) return true;
+      if ((el.getAttribute('aria-label') || el.getAttribute('title') || '').trim()) return true;
+      const by = el.getAttribute('aria-labelledby');
+      if (by && by.split(/\s+/).some(id => text(document.getElementById(id) || { innerText: '' }))) return true;
+      return [...el.querySelectorAll('img[alt], svg title, [aria-label], [title]')].some(x => (x.getAttribute('alt') || x.getAttribute('aria-label') || x.getAttribute('title') || x.textContent || '').trim());
+    };
+    const nameless = [...document.querySelectorAll('button, [role=button], a[href]')].filter(el => inScope(el) && shown(el) && !named(el));
+    if (nameless.length) add({ kind: 'unnamed-action', group: 'unnamed-action', what: `${nameless.length} action button${nameless.length === 1 ? ' has' : 's have'} no name: no words, no label for screen readers and no tooltip text`, detail: { count: nameless.length } }, nameless[0].parentElement || nameless[0]);
   }
 
   // Corner scale: what radius do cards and buttons use?

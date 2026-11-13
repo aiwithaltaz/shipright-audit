@@ -203,6 +203,27 @@ if (hasPw) {
   }
 }
 
+// 16. Existing results, opened read-only: a chat with a "click to load image" placeholder and a broken
+// image gives 2 leads, a chat with only working images gives none, and nothing is clicked.
+if (hasPw) {
+  const sout = mkdtempSync(join(tmpdir(), 'samples-'));
+  const sr = run(['skills/shipright-audit/scripts/samples.mjs', 'tests/fixtures/results-app/index.html', '--samples', '2', '--out', sout]);
+  const sm = sr.status === 0 ? JSON.parse(readFileSync(join(sout, 'samples.json'), 'utf8')) : { leads: [], items: [], lists: [] };
+  const hows = sm.leads.map(l => l.detail?.how).sort().join(',');
+  ok('samples: a load-image placeholder and a broken image are 2 leads', sm.leads.length === 2 && hows === 'broken image,load button' && sm.leads.every(l => l.id.startsWith('R') && l.pages.join() === '/index.html#/c/1' && l.widths.join() === '1280,390' && existsSync(join(sout, l.shot))), sm.leads.map(l => `${l.id} ${l.what.slice(0, 50)} on ${l.pages.join()}`).join(' | ') || `exit ${sr.status} ${sr.stderr.slice(0, 200)}`);
+  const working = sm.items.find(i => i.url.endsWith('#/c/2'));
+  ok('samples: a page with only working images gives no lead, and image pages are opened first', !!working && working.holds.images === 2 && existsSync(join(sout, working.shots['390'])) && sm.items.length === 2 && sm.lists[0]?.items_in_list === 4, `${sm.items.map(i => i.url).join(', ')}`);
+  // The crawl visits places before items, and at most 6 items of one list, so a long history cannot crowd out Settings.
+  const many = createServer((req, res2) => { res2.writeHead(200, { 'content-type': 'text/html' }); res2.end(`<nav>${Array.from({ length: 14 }, (_, i) => `<a href="/c/${i + 1}">Chat ${i + 1}</a>`).join('')}<a href="/settings">Settings</a><a href="/library">Library</a></nav><h1>${req.url}</h1>`); });
+  await new Promise(r2 => many.listen(0, '127.0.0.1', r2));
+  const mout = mkdtempSync(join(tmpdir(), 'crawl-many-'));
+  await new Promise(r2 => { const p = spawn(process.execPath, ['skills/shipright-audit/scripts/crawl.mjs', `http://127.0.0.1:${many.address().port}/`, '--out', mout], { cwd: root }); p.on('close', r2); });
+  many.close();
+  const mc = JSON.parse(readFileSync(join(mout, 'crawl.json'), 'utf8'));
+  const paths = mc.screens.map(sc => new URL(sc.url).pathname);
+  ok('crawl reaches Settings past a long list of items', paths.includes('/settings') && paths.includes('/library') && paths.filter(p => p.startsWith('/c/')).length === 6 && mc.item_lists?.[0]?.links === 14, `${paths.join(' ')}`);
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);

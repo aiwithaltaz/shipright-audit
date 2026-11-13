@@ -15,7 +15,7 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, linkPattern } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -140,6 +140,8 @@ page.on('pageerror', err => noteError(err.message));
 
 const screens = [];
 const seen = new Set();
+const itemLists = new Map();
+const PER_LIST = 6;
 try {
   await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   let settled = await settle(page);
@@ -148,18 +150,31 @@ try {
   const did = usingSignIn ? false : await signIn(page);
   if (did) { settled = await settle(page); screens.push({ ...(await snapshot(page, 's02', true)), settled }); }
   const queue = [];
+  // A list of items ("/chat/abc", "/chat/xyz", 40 more) is one kind of screen. Places (Settings,
+  // Library) are visited first, then up to PER_LIST items of each list, so a long history does not use
+  // up the crawl before it reaches Settings. samples.mjs opens more of each list.
+  const itemQueue = [];
   const pushLinks = links => {
     for (const href of links || []) {
       if (!sameApp(href, page.url())) continue;
       const abs = normUrl(new URL(href, page.url()).href);
-      if (!seen.has(abs)) queue.push(abs);
+      if (seen.has(abs) || queue.includes(abs) || itemQueue.includes(abs)) continue;
+      const pat = linkPattern(abs);
+      if (!pat) { queue.push(abs); continue; }
+      const list = itemLists.get(pat) || { pattern: pat.replace(/^https?:\/\/[^/]+/, ''), links: new Set(), crawled: 0 };
+      itemLists.set(pat, list);
+      if (list.links.has(abs)) continue;
+      list.links.add(abs);
+      if (list.crawled >= PER_LIST) continue;
+      list.crawled++;
+      itemQueue.push(abs);
     }
   };
   seen.add(normUrl(page.url()));
   for (const s of screens) { seen.add(normUrl(s.url)); pushLinks(s.links); }
   let n = screens.length;
-  while (queue.length && n < 12) {
-    const next = queue.shift();
+  while ((queue.length || itemQueue.length) && n < 12) {
+    const next = queue.length ? queue.shift() : itemQueue.shift();
     if (seen.has(next)) continue;
     seen.add(next);
     await page.goto(next, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -192,7 +207,8 @@ const emptyScreens = screens.filter(s => s.looks_empty).length;
 const unsettled = screens.filter(s => s.settled === false).map(s => s.id);
 // A screen that asks for a password after we came in signed in may mean the app signed us out mid-crawl.
 const askedLater = usingSignIn ? screens.filter((s, i) => i > 0 && s.asks_password).map(s => s.id) : [];
-const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, login_wall: loginWall, empty_screens: emptyScreens, unsettled, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+const lists = [...itemLists.values()].map(l => ({ pattern: l.pattern, links: l.links.size, crawled: [...l.links].filter(u => seen.has(u)).length })).filter(l => l.links > l.crawled);
+const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, login_wall: loginWall, empty_screens: emptyScreens, unsettled, item_lists: lists, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
@@ -207,6 +223,7 @@ if (labelDrift.length) {
   md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
   for (const d of labelDrift) md.push(`| ${d.target.replace(/^https?:\/\/[^/]+/, '')} | ${d.labels.join(' / ')} | ${Object.entries(d.where).map(([l, ss]) => `${l}: ${ss.join(', ')}`).join('; ')} |`);
 }
+if (lists.length) md.push('', '## Item lists (only the first few of each were crawled)', '', '| Pattern | Links found | Crawled |', '| --- | --- | --- |', ...lists.map(l => `| ${l.pattern} | ${l.links} | ${l.crawled} |`), '', 'Each list is one kind of screen. `samples.mjs` opens more of them, read-only, and checks what they hold.');
 writeFileSync(join(outDir, 'crawl.md'), md.join('\n') + '\n');
 if (wantJson) console.log(JSON.stringify(report));
 else console.log(`crawl: ${report.screens.length} screens in ${outDir}${usingSignIn ? ` (signed in with ${opened.label})` : ''}${loginWall ? ' · LOGIN WALL: every screen asks for a password' : ''}${emptyScreens ? ` · ${emptyScreens} empty screen(s)` : ''}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);

@@ -53,7 +53,7 @@ Leaders compared: <3 to 5 apps, and why>
 
 ## Script leads
 
-One row per lead in `visual/visual.md` (V##) and `explore/explore.md` (E##). Decision: the pain ID it became, or "Rejected: <what you saw>".
+One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##) and `samples/samples.md` (R##). Decision: the pain ID it became, or "Rejected: <what you saw>".
 
 | Lead | Check | Decision |
 |---|---|---|
