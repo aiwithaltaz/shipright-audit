@@ -62,11 +62,14 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
    - In Left behind, name both the session file and the profile folder.
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
-5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported.
+5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported. Never open a file that may list them (see 7) before the gate passes.
 6. **Use it like a real user: one question.** Looking is not enough: most of what owners complain about is what happens when you use a feature. Ask once, after the crawl, in these words: "Can I use the app like a real user? I would flip the switches in menus and turn them back, send up to 3 short test messages, and make 1 test item. Estimated cost: under $1. Everything I create will be listed so you can delete it. (Default: no.)" Do not wait long: if there is no answer, the answer is no, and you go on.
    - **On yes:** run Step 1b with `--use`, and mark the test-message steps in Step 3 `"owner_said_yes": true`. Stay inside what was asked: at most 3 short test messages (say they are tests, for example "ShipRight test: please ignore") and 1 test item. The header says `Used as a user: yes (N actions)`, and Left behind lists every test message, every test item and every switch flipped.
    - **On no (or no answer):** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
    - **Never, even on yes:** publish, send email or messages to other people, delete, pay, invite, connect an account, or change account settings. Each of those needs its own exact yes.
+
+7. **Read the owner's own rules first.** Without asking, execute `node <skill>/scripts/owner-rules.mjs <project folder> --out <audit>/owner-rules.md`. It looks in the folder for design rules and history (`DESIGN.md`, `design-system*`, `*taste*`, style guides, `CHANGELOG*`, `docs/**/*.md` and the README) and quotes each rule and each decision with its file and line. Then read those files yourself and add any rule it missed to `owner-rules.md`, quoted word for word. Also say one line that does not wait for an answer: "If you have design rules or a changelog, drop the file here any time." If the owner does, run it again with `--add <file>`.
+   - **Benchmark fairness.** Design rules and changelogs are allowed. A list of the owner's current complaints is never read before the gate passes, even if it sits in the folder (`*complaints*`, `*notes*`, `*issues*`, `*feedback*` and the like). The script skips such files without opening them. Do not open them either, and name each one as skipped in the header's "Context used" line.
 
 If the owner gives instructions at any point (what to skip, what is allowed), follow them and say which reading you took.
 
@@ -188,6 +191,20 @@ Read `references/finding-examples.md` before you write. Each pain has:
 
 Visual craft pains are usually Minor or Polish, but they rise to Major when they hide the main action, mislead (a false count), or appear on every screen.
 
+**The owner's own rules and decisions** (when `<audit>/owner-rules.md` exists). Read it before you write a single pain.
+
+- A pain that breaks one of the owner's own rules gets the lens `Owner rule: "<quote>"`, quoted word for word. That is the strongest evidence there is: the owner already agreed it matters.
+- Something that differs from the leaders or from good practice but matches an owner decision is **not a pain**. It goes in **Owner decisions respected**, with the quote. A blunt greeting the owner chose is a voice, not "scolding".
+- When you are unsure whether something is on purpose (a brand or vendor name, a tone, a style), it goes in **Decisions for the owner** as a question, not in the pains.
+
+**Names rule.** Before you flag a brand, vendor or library name in the UI, classify it:
+
+- **A license or credit line.** Fine on legal and notices pages. Flag it only where it shows as the product's own name (a tab title, the logo, the sign-in heading).
+- **A user-facing feature** (a tool, a style or a mode the user can turn on). Fine: it is the owner's feature, not a leftover.
+- **A leftover** (a starter-kit name, a template title, a test label). A pain.
+
+If you cannot tell which it is, ask in Decisions for the owner.
+
 **One problem per row.** If you need "and", a semicolon or a second sentence to add a different problem, that problem gets its own row. The same problem on several screens is one row that lists every screen. Do not pad the list with Polish to look thorough.
 
 ## Step 8: Find what is missing
@@ -223,6 +240,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] The header says how many controls were opened.
 - [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.
 - [ ] First impression has a score and a reason for T1 to T9, and a verdict.
+- [ ] When `owner-rules.md` exists: the pain map has Owner decisions respected (rows, or "None" and why), every owner quote stands word for word in `owner-rules.md`, and files skipped for fairness are named in "Context used".
 - [ ] No pain rests on a screenshot the crawl saved mid-load, unless loading is the pain.
 - [ ] No duplicate pains, and one problem per row.
 - [ ] Missing has rows, or says "None found" with what was checked.
@@ -244,7 +262,7 @@ Keep it short. In this order:
 3. **Keeps:** the top 3, one line each.
 4. **Top pains:** up to 5 Blockers and Majors, each with its screenshot.
 5. **Themes:** 3 to 5, with the pain IDs in each.
-6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide".
+6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide". Things that may be on purpose (a name, a tone, a style) are asked here, never listed as pains.
 7. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
 8. **Not verified:** what you could not check.
 9. **Left behind:** everything you created or changed in the app (test items, drafts, notifications) and in the folder (packages, the session file). Offer to remove what you can. Always remind the owner to delete `.session.json`.

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Check a pain map against the shipright-audit gate. Every failure names the row and the field to fix.
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
+// When the audit folder holds owner-rules.md, the pain map needs "## Owner decisions respected", and every
+// owner quote in it (and in an "Owner rule:" lens) must stand word for word in owner-rules.md.
 // When the audit folder holds visual/visual.json, explore/explore.json or samples/samples.json, every lead must be listed in "## Script leads"
 // as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
 // a pain may not cite that screen's screenshot.
@@ -238,6 +240,28 @@ export function check(md, dir = null) {
         }
       }
     }
+    // The owner's own rules. When owner-rules.md exists: decisions the app follows on purpose are listed
+    // (they are not pains), and every quote is real.
+    const rulesFile = find(dir, 'owner-rules.md');
+    if (rulesFile) {
+      const norm = t => String(t).toLowerCase().replace(/["'\u201c\u201d\u2018\u2019`*_]/g, '').replace(/\s+/g, ' ').trim();
+      const rulesRaw = readFileSync(rulesFile, 'utf8');
+      const rulesText = norm(rulesRaw);
+      const quoted = t => { const n = norm(t).replace(/[.:;,\s]+$/, ''); return n.length >= 12 && rulesText.includes(n); };
+      const inQuotes = t => (String(t).match(/["\u201c]([^"\u201d]{12,})["\u201d]?/) || [])[1] || t;
+      if (!sections['Owner decisions respected']) errors.push('Missing section "## Owner decisions respected". The folder has owner-rules.md: list each thing that differs from the leaders or from good practice but matches a decision the owner wrote down, with the quote. Or write "None" and why.');
+      else {
+        const od = table(sections['Owner decisions respected']);
+        if (!od.rows.length && !/\bnone\b/i.test(sections['Owner decisions respected'].join('\n'))) errors.push('Owner decisions respected: list each owner decision the app follows, with the quote, or write "None" and why.');
+        od.rows.forEach((r, i) => { const words = cell(od, r, 'owner') || r[1] || ''; if (!quoted(inQuotes(words))) errors.push(`Owner decisions respected row ${i + 1} ("${r[0]}"): quote the owner's words exactly as they stand in owner-rules.md.`); });
+      }
+      for (const r of pains.rows) {
+        const lens = cell(pains, r, 'heuristic').match(/owner rule:?\s*(.*)$/i);
+        if (lens && !quoted(inQuotes(lens[1]))) errors.push(`Pains ${r[0]}: an "Owner rule:" lens must quote the rule exactly as it stands in owner-rules.md.`);
+      }
+      // Files skipped for fairness (they may list the owner's current complaints) are named, not hidden.
+      for (const m of rulesRaw.matchAll(/^- (.+?): its name says it may list/gm)) if (!md.includes(basename(m[1]))) errors.push(`owner-rules.md skipped ${m[1]} without opening it. Say so in the "Context used" line: "skipped ${basename(m[1])} (may list current complaints)".`);
+    }
     // Mid-load screenshots: a screen the crawl saw still changing cannot carry a claim on its own.
     const cj = find(dir, 'crawl.json');
     if (cj) {
@@ -257,8 +281,9 @@ export function check(md, dir = null) {
   return errors;
 }
 
-function selfTest() {
-  const good = `# Pain map: Demo
+// A complete pain map that passes the gate. The self-test and the repo tests start from it.
+export function samplePainMap() {
+  return `# Pain map: Demo
 Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Controls opened: 12 of 14 · Reviewers: 1 · Method: crawl
 Phone coverage: 1 of 1 in-scope screens · Used as a user: no · Competitor research: live, checked 2026-10-23
 Scope: booking
@@ -347,6 +372,10 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
 ## Left behind
 - Nothing: no test data was created
 `;
+}
+
+function selfTest() {
+  const good = samplePainMap();
   const bad = good
     .replace('| P02 | No phone nav | Header, screens/home-390.png | Phone users | H3 | Blocker | layout | Found, by 2 of 2 reviewers |', '| P01 | No phone nav | Header | Phone users |  | High | navigation | Guess |')
     .replace('| B | Prevent errors | Earliest slot is valid |', '| B |  |  |')
@@ -419,8 +448,25 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     ['missing: no "What leaders have" part fails', check(good.replace(/### What leaders have[\s\S]*?\n\n/, '\n')).some(e => e.includes('What leaders have that this app doesn'))],
     ['missing: a leader with no link fails when research is live', check(good.replace(/Leader A \(https[^)]*\), Leader B \(https[^)]*\)/, 'Leader A, Leader B')).some(e => e.includes('name the leaders and link the page'))],
   );
+  // Owner rules: when owner-rules.md sits in the audit folder, the section is required and quotes must be real.
+  const d4 = mkdtempSync(join(tmpdir(), 'gate-rules-'));
+  mkdirSync(join(d4, 'screens'));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d4, f), '');
+  writeFileSync(join(d4, 'owner-rules.md'), '# Owner rules\n\n| # | Kind | Quote | File and line |\n| --- | --- | --- | --- |\n| O01 | rule | "Cards always sit 16px apart, on every screen." | DESIGN.md:5 |\n| O02 | decision | "The greeting is blunt on purpose. Keep it: "Back again? Fine."" | DESIGN.md:10 |\n\n## Skipped on purpose (benchmark fairness)\n\n- current-complaints.md: its name says it may list the owner\'s current complaints. Not opened.\n');
+  const ruled = good.replace('Context used: none given', 'Context used: DESIGN.md (owner rules); skipped current-complaints.md (may list current complaints)')
+    .replace('| P01 | Rule shown late | Book step 4, screens/book-1280.png | Owners | H5 |', '| P01 | Cards sit 28px apart | Book step 4, screens/book-1280.png | Owners | Owner rule: "Cards always sit 16px apart, on every screen." |');
+  const respected = '\n## Owner decisions respected\n| What the app does | Owner\'s words | File and line | What it differs from |\n|---|---|---|---|\n| The greeting says "Back again? Fine." | "The greeting is blunt on purpose. Keep it: "Back again? Fine."" | DESIGN.md:10 | Leaders greet warmly |\n';
+  cov.push(
+    ['owner rules: the section is required when owner-rules.md exists', check(ruled, d4).some(e => e.includes('Missing section "## Owner decisions respected"'))],
+    ['owner rules: a rule break as a pain with an Owner rule lens, and a respected decision, pass', check(ruled + respected, d4).length === 0],
+    ['owner rules: "None" with a reason passes', check(ruled + '\n## Owner decisions respected\nNone: nothing in the app differs from the leaders in a way the owner chose.\n', d4).length === 0],
+    ['owner rules: an invented quote in a lens fails', check(ruled.replace('Cards always sit 16px apart, on every screen.', 'Cards should feel airy and light.') + respected, d4).some(e => e.includes('must quote the rule exactly'))],
+    ['owner rules: an invented quote in a respected decision fails', check(ruled + respected.replace('The greeting is blunt on purpose. Keep it:', 'We like a rude greeting:'), d4).some(e => e.includes('quote the owner\'s words exactly'))],
+    ['owner rules: a skipped complaints file must be named', check(ruled.replace('; skipped current-complaints.md (may list current complaints)', '') + respected, d4).some(e => e.includes('skipped current-complaints.md without opening it'))],
+    ['owner rules: no owner-rules.md, no section needed', check(good, d).filter(e => /owner/i.test(e)).length === 0],
+  );
   const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
-  console.log(covFailed.length === 0 ? `PASS  0.7 header and research checks: ${cov.length} cases` : `FAIL  0.7 header and research checks: ${covFailed.join(', ')}`);
+  console.log(covFailed.length === 0 ? `PASS  0.7 header, research and owner-rule checks: ${cov.length} cases` : `FAIL  0.7 header, research and owner-rule checks: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
   const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'Competitor research:', 'verdict must be Matches', 'Compare at least 10', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));

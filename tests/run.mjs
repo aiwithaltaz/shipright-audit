@@ -2,7 +2,7 @@
 // One command for every repo check: npm test (or node tests/run.mjs).
 // Runs the offline self-tests, manifest and skill checks, a style scan, and the seeded-app check
 // (the last one only when Playwright is installed).
-import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -253,6 +253,36 @@ if (hasPw) {
   const wj = JSON.parse(readFileSync(join(wdir, 'out', 'walk.json'), 'utf8'));
   const kindsAt = wj.leads.map(l => `${l.kind}@${l.widths.join('+')}`).sort().join(' ');
   ok('an owner-approved test message is sent once and its result is checked at both widths', wcode === 0 && hits.length === 1 && wj.used_actions.length === 2 && wj.widths['390'].once_at === 1 && wj.widths['390'].broke_at === null && kindsAt === 'clipped-text@390 media-not-loaded@1280+390 unnamed-action@1280+390' && existsSync(join(wdir, 'out', '390-02-result.png')), `exit ${wcode}, ${hits.length} message(s) sent, ${kindsAt}`);
+}
+
+// 18. The owner's own rules. A folder with a design doc holding one rule the app breaks (cards 16px
+// apart; they sit 28px apart) and one decision the app follows on purpose (a blunt greeting), plus a
+// complaints file that must never be opened.
+{
+  const adir = mkdtempSync(join(tmpdir(), 'rules-')), rulesOut = join(adir, 'owner-rules.md');
+  const or = run(['skills/shipright-audit/scripts/owner-rules.mjs', 'tests/fixtures/owner-rules-app', '--out', rulesOut]);
+  const rules = existsSync(rulesOut) ? readFileSync(rulesOut, 'utf8') : '';
+  ok('owner-rules.mjs quotes the rule and the decision with file and line', or.status === 0 && /"Cards always sit 16px apart, on every screen\." \| DESIGN\.md:5/.test(rules) && /\| decision \| "The greeting is blunt on purpose\. Keep it: "Back again\? Fine\."" \| DESIGN\.md:10/.test(rules) && /We decided against a friendlier one.*CHANGELOG\.md:5/.test(rules), or.stdout.trim().slice(0, 90));
+  ok('owner-rules.mjs never opens a complaints file, and says it skipped it', /- current-complaints\.md: its name says/.test(rules) && !/too far apart|Search is slow/i.test(rules + or.stdout), 'current-complaints.md');
+  // The gate, on the real owner-rules.md: the rule break is a pain with an Owner rule lens, the decision
+  // sits under Owner decisions respected, and the section is required.
+  const { check, samplePainMap } = await import('../skills/shipright-audit/scripts/check-stage.mjs');
+  mkdirSync(join(adir, 'screens'));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(adir, f), '');
+  const map = samplePainMap().replace('Context used: none given', 'Context used: DESIGN.md and CHANGELOG.md (owner rules); skipped current-complaints.md (may list current complaints)')
+    .replace('| P01 | Rule shown late | Book step 4, screens/book-1280.png | Owners | H5 |', '| P01 | The home cards sit 28px apart | Home, screens/home-1280.png | Owners | Owner rule: "Cards always sit 16px apart, on every screen." |');
+  const respected = '\n## Owner decisions respected\n| What the app does | Owner\'s words (quoted) | File and line | What it differs from |\n|---|---|---|---|\n| Greets with "Back again? Fine." | "The greeting is blunt on purpose. Keep it: "Back again? Fine."" | DESIGN.md:10 | Leaders greet warmly |\n';
+  const without = check(map, adir), withIt = check(map + respected, adir);
+  ok('gate: a rule break is a pain with an Owner rule lens, a kept decision is respected, the section is required', without.some(e => e.includes('Missing section "## Owner decisions respected"')) && withIt.length === 0, withIt.join(' | ') || `${without.length} problem(s) without the section, 0 with it`);
+  // The fixture is what the design doc says it is: the cards sit 28px apart, and the greeting is the blunt one.
+  if (hasPw) {
+    const { chromium } = createRequire(join(root, 'package.json'))('playwright');
+    const b = await chromium.launch(); const pg = await b.newPage({ viewport: { width: 1280, height: 800 } });
+    await pg.goto('file://' + join(root, 'tests/fixtures/owner-rules-app/index.html'));
+    const m = await pg.evaluate(() => { const c = [...document.querySelectorAll('.card')].map(x => x.getBoundingClientRect()); return { gap: Math.round(c[1].left - c[0].right), greeting: document.getElementById('greeting').textContent }; });
+    await b.close();
+    ok('owner-rules fixture breaks the spacing rule and keeps the greeting', m.gap === 28 && m.greeting === 'Back again? Fine.', `gap ${m.gap}px, greeting "${m.greeting}"`);
+  }
 }
 
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)

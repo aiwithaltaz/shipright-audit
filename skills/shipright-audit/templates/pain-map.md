@@ -4,7 +4,7 @@ Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Controls opened
 Phone coverage: <x of y> in-scope screens · Used as a user: <yes (n actions) / no> · Competitor research: <live, checked <date> / from knowledge, no web tool>
 Scope: <the core tasks audited>
 Out of scope: <what was not audited>
-Context used: <users, business goal, analytics, owner complaints: or "none given">
+Context used: <users, business goal, analytics, owner rules read (owner-rules.md), files skipped for fairness: or "none given">
 
 ## First impression
 
@@ -43,6 +43,13 @@ Every screen needs its 1280 and its 390 screenshot. A screen you could not see a
 
 | ID | What happens | Where (screens + screenshot) | Who | Heuristic or lens | Severity (1-4) | Cause | Source |
 |---|---|---|---|---|---|---|---|
+
+## Owner decisions respected
+
+Fill this when `owner-rules.md` exists. These differ from the leaders or from good practice, but match a decision the owner wrote down, so they are not pains. Quote the owner word for word. Write "None" and why if there are none.
+
+| What the app does | Owner's words (quoted) | File and line | What it differs from |
+|---|---|---|---|
 
 ## Category conventions
 
