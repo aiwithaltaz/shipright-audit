@@ -7,7 +7,7 @@
 // What it does, on the start page, --routes and every screen in --crawl:
 //   1. Finds item lists: links inside nav, aside, lists and tables that share a pattern
 //      ("/chat/abc" and "/chat/xyz" are both "/chat/*").
-//   2. Looks at up to 3 x N items per list, and keeps the N (default 5) whose page holds the most to
+//   2. Looks at up to 2 x N + 2 items per list, and keeps the N (default 5) whose page holds the most to
 //      check: images, video, files, code, artifacts, tool and connector results.
 //   3. On each kept item, at 1280 and at 390 wide: scrolls through it, saves a full-page screenshot and
 //      runs the page checks (analyze-page.js) plus the result checks: media that never loaded (a broken
@@ -33,7 +33,7 @@ mkdirSync(outDir, { recursive: true });
 const { session, profile } = signInFlags(args, 'samples');
 const N = Math.max(1, Number(flag('--samples') || 5));
 const widths = widthsFlag(args);
-const MAX_SHOT_PX = 6000, MAX_LISTS = 8;
+const MAX_SHOT_PX = 6000, MAX_LISTS = 6;
 const RISKY_HREF = /delete|remove|destroy|log-?out|sign-?out|archive|unsubscribe|export|download|revoke|disconnect|share|publish|duplicate/i;
 
 const site = await openTarget(target, 'samples');
@@ -91,11 +91,11 @@ try {
     }
   }
   const found = [...byPattern.values()].filter(l => l.links.size >= 2).sort((a, b) => b.links.size - a.links.size);
-  // 2. In each list, look at up to 3 x N items and keep the N with the most to check.
+  // 2. In each list, look at up to 2 x N + 2 items and keep the N with the most to check.
   let listNo = 0;
   for (const list of found.slice(0, MAX_LISTS)) {
     listNo++;
-    const candidates = [...list.links].slice(0, Math.min(3 * N, 15));
+    const candidates = [...list.links].slice(0, Math.min(2 * N + 2, 12));
     const scored = [];
     for (const [href, text] of candidates) {
       const ok = await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 20000 }).then(r => !r || r.status() < 400).catch(() => false);

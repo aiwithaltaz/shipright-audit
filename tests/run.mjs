@@ -184,6 +184,10 @@ if (hasPw) {
   const bad = [];
   for (const [n, a] of others) { const r2 = await spawnNode(a); if (r2.code !== 0 || !/signed in with the sign-in profile/.test(r2.err)) bad.push(`${n}: exit ${r2.code} ${r2.err.trim().split('\n').pop()}`); }
   ok('explore, visual, consistency and walk all stay signed in with --profile', bad.length === 0, bad.join(' | ') || `${others.length} scripts, ${app.stats.refresh_ok} token swaps`);
+  // One script at a time: a second script on the same profile stops with a clear message, and the profile stays good.
+  const [first, second] = await Promise.all([spawnNode([S + 'crawl.mjs', app.url, '--profile', prof, '--out', join(dir, 'p1')]), new Promise(r2 => setTimeout(r2, 700)).then(() => spawnNode([S + 'visual.mjs', app.url, '--profile', prof, '--no-click', '--out', join(dir, 'p2')]))]);
+  const afterBoth = await spawnNode([S + 'visual.mjs', app.url, '--profile', prof, '--no-click', '--out', join(dir, 'p3')]);
+  ok('two scripts never share a profile: the second one stops and says why', first.code === 0 && second.code === 2 && /in use by another script/.test(second.err) && afterBoth.code === 0, `first ${first.code}, second ${second.code}, after ${afterBoth.code}`);
   // The session file was saved at sign-in. The app has swapped its token many times since: it must fail, loudly.
   const c2 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--out', join(dir, 'c2')]);
   ok('--session alone fails on a token-rotating app, with a clear message', c2.code === 3 && c2.err.includes('The app signed us out (401). Run login.mjs again.') && !existsSync(join(dir, 'c2', 'crawl.json')), `exit ${c2.code}: ${c2.err.trim().split('\n')[0]}`);

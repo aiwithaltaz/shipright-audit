@@ -31,7 +31,8 @@
 // chips or panels, text near the message box, the URL) with a screenshot before and after, then flips
 // it back and checks it is back. A switch that adds something visible away from itself is a
 // "toggle-side-effect" lead. It never flips switches on settings or account pages, or ones with risky
-// or account-wide names (notifications, billing, privacy, sharing...): those need their own yes.
+// or account-wide names (notifications, billing, privacy, sharing...), or ones that change one of the user's
+// items (a checkbox on every row of a list, a bookmark): those need their own yes.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
 import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -58,6 +59,8 @@ const TOGGLES = '[role=switch], [role=menuitemcheckbox], [role=checkbox], input[
 // Switches that change the account, not the screen in front of the user. Never flipped.
 const ACCOUNT_PLACE = /settings|preferences|account|billing|profile|admin|security|notification|privacy|team|members|integrations|workspace|organi[sz]ation/i;
 const ACCOUNT_NAME = /notif|e-?mail|sms|billing|subscri|renew|two-factor|2fa|privacy|public|private|visib|sync|train|improve|telemetry|analytics|marketing|newsletter|cookie|backup|memory|remember|consent|terms|agree/i;
+// Switches that change one of the user's items (a task ticked off, a bookmark), not how the screen works. Never flipped.
+const ITEM_ACTION = /bookmark|mute|block|watch|up-?vote|down-?vote|react|complete|\bdone\b|resolve|\bhide\b|snooze|\bread\b|unread|\block\b|select (all|row|item)/i;
 
 // What is open right now: dialogs, menus, pop-overs, the URL and how much text the page shows.
 const STATE = () => {
@@ -106,7 +109,10 @@ const FIND_TOGGLES = ([sel, layers, inLayer]) => {
     if (!vis(el) && !(label && vis(label))) return;
     const name = (el.getAttribute('aria-label') || text(el) || (label && text(label)) || text(el.closest('li, [role=menuitem], tr, div') || el) || '').slice(0, 60);
     const place = within ? (within.getAttribute('aria-label') || text(within.querySelector('h1, h2, h3, [role=heading]') || { innerText: '' })) : '';
-    out.push({ i, name: name || '(no name)', state: state(el), place: place.slice(0, 60), clickLabel: !vis(el) });
+    // A checkbox on each row of a list (tick a task, pick a row) is the user's data, not a setting.
+    const row = within ? null : el.closest('li, tr, [role=row], [role=listitem], [role=option]');
+    const perItem = !!row && !!row.parentElement && [...row.parentElement.children].filter(r => r.querySelector(sel) || r.matches(sel)).length >= 3;
+    out.push({ i, name: name || '(no name)', state: state(el), place: place.slice(0, 60), clickLabel: !vis(el), perItem });
   });
   return out;
 };
@@ -148,6 +154,7 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
     toggles.push(row);
     if (DANGER.test(t.name)) row.skipped = 'risky word';
     else if (ACCOUNT_NAME.test(t.name)) row.skipped = 'an account-wide setting: needs its own yes';
+    else if (t.perItem || ITEM_ACTION.test(t.name)) row.skipped = 'changes one of the user\'s items, not a setting: needs its own yes';
     else if (ACCOUNT_PLACE.test(where) || ACCOUNT_PLACE.test(t.place) || ACCOUNT_PLACE.test(opener || '')) row.skipped = 'on a settings or account screen: needs its own yes';
     else if (toggles.filter(x => x.flipped && x.page === row.page).length >= MAX_FLIPS) row.skipped = 'page limit reached';
     if (row.skipped) continue;
