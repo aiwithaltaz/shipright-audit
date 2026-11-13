@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Walk one core task like a first-time user: click, type and pick by visible words, screenshot every step.
-// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--session session.json]
-// --session: a signed-in session saved by login.mjs.
+// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]
+// --profile: the sign-in window's browser profile (login.mjs prints its path). Tried first.
+// --session: a signed-in session file saved by login.mjs. The fallback.
+// With either, it stops with exit 3 if the app no longer knows us.
 // The walk runs twice, at 1280 and at 390 wide, so phone-only breaks show up.
 // Plan file (write one per task):
 // {
@@ -23,7 +25,7 @@
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
-import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -31,10 +33,10 @@ import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const pos = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
+const pos = args.filter((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile'].includes(args[i - 1]));
 const [target, planPath] = pos;
 if (!target || !planPath || !existsSync(planPath)) {
-  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--session session.json]');
+  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]');
   process.exit(2);
 }
 let plan;
@@ -44,9 +46,7 @@ const KNOWN = ['goto', 'click', 'fill', 'select', 'press', 'expect', 'note'];
 const unknown = plan.steps.map((s, i) => [i + 1, s.do]).filter(([, d]) => !KNOWN.includes(d));
 if (unknown.length) { console.error(`walk: unknown step type(s): ${unknown.map(([n, d]) => `step ${n} "${d}"`).join(', ')}. Use ${KNOWN.join(', ')}.`); process.exit(2); }
 
-const si = args.indexOf('--session');
-const session = si >= 0 ? args[si + 1] : null;
-if (session && !existsSync(session)) { console.error(`walk: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
+const { session, profile } = signInFlags(args, 'walk');
 const oi = args.indexOf('--out');
 const slug = String(plan.task || basename(planPath, '.json')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'task';
 const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audits', 'current', 'walks', slug));
@@ -96,9 +96,16 @@ async function findField(page, field) {
   return null;
 }
 
-async function walkAt(browser, startUrl, width) {
-  const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, ...(session ? { storageState: session } : {}) });
-  const page = await context.newPage();
+// One page per width. A sign-in profile is one browser context, so both widths share it there (and the
+// app's own state carries over, as it would for a real user). With a session file each width gets its own
+// context that starts from the newest sign-in state (the app may have swapped its token during the last
+// width). With no sign-in each width starts fresh.
+let carried = null;
+async function walkAt(opened, startUrl, width) {
+  const viewport = { width, height: width === 390 ? 844 : 800 };
+  const own = opened.mode === 'profile' ? null : await opened.browser.newContext({ viewport, ...(opened.mode === 'session' ? { storageState: carried || await opened.context.storageState() } : {}) });
+  const page = await (own || opened.context).newPage();
+  await page.setViewportSize(viewport);
   const errors = [];
   page.on('console', m => { if (m.type() === 'error') errors.push(m.text().slice(0, 300)); });
   page.on('pageerror', e => errors.push(e.message.slice(0, 300)));
@@ -152,22 +159,22 @@ async function walkAt(browser, startUrl, width) {
     log.push(entry);
     if (!entry.ok && s.do !== 'expect') { brokeAt = n; break; }
   }
-  await context.close();
+  if (own && opened.mode === 'session') carried = await own.storageState().catch(() => carried);
+  if (own) await own.close(); else await page.close().catch(() => {});
   return { width, actions, broke_at: brokeAt, held_at: heldAt, finished: brokeAt === null && heldAt === null, steps: log, console_errors: [...new Set(errors)] };
 }
 const h1 = page => page.locator('h1').first().innerText({ timeout: 1000 }).then(t => t.replace(/\s+/g, ' ').trim().slice(0, 120)).catch(() => '');
 
-const { chromium } = loadPlaywright('walk');
-const browser = await launch(chromium, {}, 'walk');
 let server, startUrl = target;
 if (!remote) {
   server = await serve(root);
   const rel = pagePath.startsWith(root) ? pagePath.slice(root.length).split(sep).join('/') : '/' + basename(pagePath);
   startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
+const opened = await openContext({ session, profile, name: 'walk', url: startUrl });
 let runs;
-try { runs = [await walkAt(browser, startUrl, 1280), await walkAt(browser, startUrl, 390)]; }
-finally { await browser.close(); if (server) server.close(); }
+try { runs = [await walkAt(opened, startUrl, 1280), await walkAt(opened, startUrl, 390)]; }
+finally { await opened.close(); if (server) server.close(); }
 
 const report = { task: plan.task || slug, target, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
 writeFileSync(join(outDir, 'walk.json'), JSON.stringify(report, null, 2) + '\n');

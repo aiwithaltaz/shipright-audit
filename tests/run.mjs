@@ -136,6 +136,50 @@ if (hasPw) {
   ok('explorer on a live app clicks only controls that open something', /could change data/.test(lres('Bookmark')) && /could change data/.test(lres('Handoff')) && /^opened/.test(lres('Settings')), `Bookmark: ${lres('Bookmark')}`);
 }
 
+// 15. Staying signed in on an app that swaps its sign-in token on every refresh (an old token gets 401).
+// The sign-in window's profile keeps working for every script; the saved session file alone goes stale.
+if (hasPw) {
+  const { startRotatingApp } = await import('./fixtures/rotating-app/server.mjs');
+  const app = await startRotatingApp();
+  const spawnNode = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root, env: { ...process.env, SHIPRIGHT_NO_HEADED: '1' } }); let err = '', out = ''; p.stderr.on('data', d => { err += d; }); p.stdout.on('data', d => { out += d; }); p.on('close', code => res({ code, err, out })); });
+  const dir = mkdtempSync(join(tmpdir(), 'rotate-')), prof = join(dir, 'profile'), sess = join(dir, 'session.json');
+  const S = 'skills/shipright-audit/scripts/';
+  const li = await spawnNode([S + 'login.mjs', `${app.url}?auto`, '--headless', '--timeout', '20', '--out', sess, '--profile', prof]);
+  ok('login.mjs prints the profile path and browser for the next script', li.code === 0 && li.out.includes(prof) && /Browser: /.test(li.out) && existsSync(join(prof, 'shipright-profile.json')), `exit ${li.code}`);
+  const c1 = await spawnNode([S + 'crawl.mjs', app.url, '--profile', prof, '--session', sess, '--out', join(dir, 'c1')]);
+  const cj = c1.code === 0 ? JSON.parse(readFileSync(join(dir, 'c1', 'crawl.json'), 'utf8')) : { screens: [] };
+  ok('crawl stays signed in with --profile on a token-rotating app', c1.code === 0 && cj.login_wall === false && cj.screens.length >= 3 && cj.screens.every(s => !s.asks_password) && /sign-in profile/.test(cj.signed_in_with || ''), `exit ${c1.code}, ${cj.screens.length} screens, ${cj.signed_in_with || c1.err.trim().split('\n').pop()}`);
+  // Every other script reuses the same profile, one after the other.
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify({ task: 'Open projects', steps: [{ do: 'click', text: 'Projects' }, { do: 'expect', text: 'Garden plan' }] }));
+  const others = [
+    ['explore', [S + 'explore.mjs', app.url, '--profile', prof, '--out', join(dir, 'e')]],
+    ['visual', [S + 'visual.mjs', app.url, '--profile', prof, '--out', join(dir, 'v')]],
+    ['consistency', [S + 'consistency.mjs', app.url, '--profile', prof, '--out', join(dir, 'k')]],
+    ['walk', [S + 'walk.mjs', app.url, join(dir, 'plan.json'), '--profile', prof, '--out', join(dir, 'w')]],
+  ];
+  const bad = [];
+  for (const [n, a] of others) { const r2 = await spawnNode(a); if ((r2.code !== 0 && !(n === 'consistency' && r2.code === 1)) || !/signed in with the sign-in profile/.test(r2.err)) bad.push(`${n}: exit ${r2.code} ${r2.err.trim().split('\n').pop()}`); }
+  ok('explore, visual, consistency and walk all stay signed in with --profile', bad.length === 0, bad.join(' | ') || `${others.length} scripts, ${app.stats.refresh_ok} token swaps`);
+  // The session file was saved at sign-in. The app has swapped its token many times since: it must fail, loudly.
+  const c2 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--out', join(dir, 'c2')]);
+  ok('--session alone fails on a token-rotating app, with a clear message', c2.code === 3 && c2.err.includes('The app signed us out (401). Run login.mjs again.') && !existsSync(join(dir, 'c2', 'crawl.json')), `exit ${c2.code}: ${c2.err.trim().split('\n')[0]}`);
+  // A stale session falls back to nothing, but a stale session plus a good profile is fine (profile first).
+  const c3 = await spawnNode([S + 'crawl.mjs', app.url, '--session', sess, '--profile', prof, '--out', join(dir, 'c3')]);
+  ok('profile is tried before the session file', c3.code === 0 && /signed in with the sign-in profile/.test(c3.err), `exit ${c3.code}`);
+  app.stop();
+  // A site that refuses headless browsers: retry once in a window placed off screen, and say which mode ran.
+  // This opens a real (off screen) window, so it only runs when asked: SHIPRIGHT_TEST_HEADED=1 npm test
+  if (process.env.SHIPRIGHT_TEST_HEADED === '1') {
+    const shy = await startRotatingApp({ refuseHeadless: true });
+    const d2 = mkdtempSync(join(tmpdir(), 'shy-')), p2 = join(d2, 'profile');
+    // Sign in with a window, because this app turns headless browsers away.
+    const l2 = await new Promise(res => { const p = spawn(process.execPath, [S + 'login.mjs', `${shy.url}?auto`, '--timeout', '30', '--out', join(d2, 's.json'), '--profile', p2], { cwd: root, env: { ...process.env, SHIPRIGHT_BROWSER: 'chromium' } }); p.on('close', code => res(code)); });
+    const h = await new Promise(res => { const p = spawn(process.execPath, [S + 'crawl.mjs', shy.url, '--profile', p2, '--out', join(d2, 'c')], { cwd: root }); let err = ''; p.stderr.on('data', d => { err += d; }); p.on('close', code => res({ code, err })); });
+    shy.stop();
+    ok('a site that refuses headless is retried in a window off screen', l2 === 0 && h.code === 0 && /window off screen/.test(h.err), `login ${l2}, crawl ${h.code}: ${h.err.trim().split('\n').pop()}`);
+  }
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);

@@ -3,10 +3,12 @@
 // sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, and counts that
 // promise items a page does not have. Every finding gets a cropped screenshot.
 // Usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes "#/,#/library"] [--crawl crawl.json]
-//        [--session session.json] [--out dir] [--no-click]
+//        [--profile dir] [--session session.json] [--out dir] [--no-click]
 // --routes   extra pages to check (hash routes, paths or URLs), in addition to the start page
 // --crawl    take every screen URL from a crawl.json written by crawl.mjs
-// --session  a signed-in session saved by login.mjs
+// --profile  the sign-in window's browser profile (login.mjs prints its path). Tried first.
+// --session  a signed-in session file saved by login.mjs. The fallback.
+//            With either, it stops with exit 3 if the app no longer knows us.
 // --no-click do not open menus (skips the layering check)
 // Opens only menus and popovers (aria-haspopup or aria-expanded). Never clicks risky words
 // (delete, publish, send, generate, save, sign out and the rest of DANGER in browser.mjs).
@@ -14,7 +16,7 @@
 // Writes visual.json, visual.md and V##-*.png crops to --out (the skill passes <audit>/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
-import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -23,14 +25,13 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--out'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes ...] [--crawl crawl.json] [--session file] [--out dir] [--no-click]'); process.exit(2); }
+if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes ...] [--crawl crawl.json] [--profile dir] [--session file] [--out dir] [--no-click]'); process.exit(2); }
 const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'visual'));
 mkdirSync(outDir, { recursive: true });
-const session = flag('--session');
-if (session && !existsSync(session)) { console.error(`visual: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
+const { session, profile } = signInFlags(args, 'visual');
 const noClick = args.includes('--no-click');
 
 const remote = /^https?:/.test(target);
@@ -100,16 +101,14 @@ async function openMenus(page, routeId, startFinding) {
   return { menus: out, next: n };
 }
 
-const { chromium } = loadPlaywright('visual');
-const browser = await launch(chromium, {}, 'visual');
-const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(session ? { storageState: session } : {}) });
-const page = await context.newPage();
 let server, startUrl = target;
 if (!remote) {
   server = await serve(root);
   const rel = pagePath.slice(root.length).split(sep).join('/');
   startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
+const opened = await openContext({ session, profile, name: 'visual', url: startUrl });
+const page = opened.page;
 const urls = [startUrl];
 for (const r of (flag('--routes') || '').split(',').map(s => s.trim()).filter(Boolean)) urls.push(/^https?:/.test(r) ? r : new URL(r, startUrl).href);
 if (flag('--crawl')) {
@@ -170,7 +169,7 @@ try {
     }
   }
 } finally {
-  await browser.close();
+  await opened.close();
   if (server) server.close();
 }
 
@@ -185,7 +184,7 @@ for (const f of findings) {
 }
 writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads: leads.map(({ key, ...l }) => l), findings: findings.map(f => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
 const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card' };
-const md = ['# Visual checks', '', `${pages.length} page(s) at 1280 wide${session ? ', signed in' : ''}, ${leads.length} lead(s).`, '',
+const md = ['# Visual checks', '', `${pages.length} page(s) at 1280 wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
 const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));
 if (unsettledPages.length) md.push(`> **Still loading:** ${unsettledPages.join(', ')} kept changing for 10 seconds. Leads there may describe the loading state.`, '');

@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // Visit every reachable screen of a local app or URL.
-// Usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--session session.json] [--json]
-// --session: a signed-in session saved by login.mjs, so the crawl can reach screens behind the login.
+// Usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--profile dir] [--session session.json] [--json]
+// --profile: the sign-in window's browser profile (login.mjs prints its path). Use it first: it always
+//            holds the newest sign-in, even when the app swaps its sign-in token on every refresh.
+// --session: a signed-in session file saved by login.mjs. The fallback when the profile cannot be used.
+// With either, the crawl first checks that the app still knows us. If not, it tries the other one once,
+// then stops with exit 3 ("The app signed us out"). It never crawls on silently signed out.
+// Run one script at a time on a profile.
 // Also reports a login wall (every screen asks for a password) and empty screens (little or no data).
 // <skill> is the folder that holds SKILL.md.
 // Saves full-page shots at 390 and 1280 (capped at 6000px tall), the H1, actions, fields, and console errors.
@@ -10,7 +15,7 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
-import { launch, loadPlaywright, settle, normUrl } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -18,15 +23,14 @@ import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--out' && args[i - 1] !== '--session');
+const target = args.find((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile'].includes(args[i - 1]));
 if (!target) {
-  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--session session.json] [--json]');
+  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--profile dir] [--session session.json] [--json]');
   process.exit(2);
 }
 const flag = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const wantJson = args.includes('--json');
-const session = flag('--session');
-if (session && !existsSync(session)) { console.error(`crawl: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
+const { session, profile } = signInFlags(args, 'crawl');
 const remote = /^https?:/.test(target);
 const pagePath = remote ? null : resolve(target);
 const root = remote ? null : (existsSync(pagePath) && statSync(pagePath).isDirectory() ? pagePath : dirname(pagePath));
@@ -89,7 +93,7 @@ async function snapshot(page, id, signedIn) {
     shot[vp.name] = file;
     shot[`${vp.name}_page_height`] = full;
   }
-  return { id, url: page.url(), route, signed_in: signedIn || !!session, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, asks_password: facts.password, looks_empty: facts.empty, shots: shot, console_errors: errors.slice() };
+  return { id, url: page.url(), route, signed_in: signedIn || usingSignIn, title: facts.title, h1: facts.h1, h2: facts.h2, actions: facts.actions, fields: facts.fields, links: facts.links, link_labels: facts.linkLabels, asks_password: facts.password, looks_empty: facts.empty, shots: shot, console_errors: errors.slice() };
 }
 
 async function signIn(page) {
@@ -118,15 +122,6 @@ function sameApp(href, base) {
   } catch { return false; }
 }
 
-const { chromium } = loadPlaywright('crawl');
-const browser = await launch(chromium, {
-  args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'],
-}, 'crawl');
-const context = await browser.newContext(session ? { storageState: session } : {});
-const page = await context.newPage();
-page.on('console', msg => { if (msg.type() === 'error') noteError(msg.text()); });
-page.on('pageerror', err => noteError(err.message));
-
 let server;
 let startUrl = target;
 if (!remote) {
@@ -135,6 +130,13 @@ if (!remote) {
   const rel = pagePath.startsWith(root) ? pagePath.slice(root.length).split(sep).join('/') : '/' + basename(pagePath);
   startUrl = `http://127.0.0.1:${port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
+// Opens the browser and, with --profile or --session, checks that the app still knows us (exit 3 if not).
+const opened = await openContext({ session, profile, name: 'crawl', url: startUrl,
+  launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] } });
+const usingSignIn = opened.mode !== 'none';
+const page = opened.page;
+page.on('console', msg => { if (msg.type() === 'error') noteError(msg.text()); });
+page.on('pageerror', err => noteError(err.message));
 
 const screens = [];
 const seen = new Set();
@@ -142,7 +144,8 @@ try {
   await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   let settled = await settle(page);
   screens.push({ ...(await snapshot(page, 's01', false)), settled });
-  const did = await signIn(page);
+  // The demo sign-in is for local sample apps. Never press a form's button when we came in signed in.
+  const did = usingSignIn ? false : await signIn(page);
   if (did) { settled = await settle(page); screens.push({ ...(await snapshot(page, 's02', true)), settled }); }
   const queue = [];
   const pushLinks = links => {
@@ -168,7 +171,7 @@ try {
     pushLinks(shot.links);
   }
 } finally {
-  await browser.close();
+  await opened.close();
   if (server) server.close();
 }
 
@@ -187,7 +190,9 @@ const labelDrift = [...byTarget].filter(([, m]) => m.size > 1).map(([t, m]) => (
 const loginWall = screens.length > 0 && screens.every(s => s.asks_password || /login|sign-?in|signup|sign-?up|register|auth/i.test(s.route + s.url));
 const emptyScreens = screens.filter(s => s.looks_empty).length;
 const unsettled = screens.filter(s => s.settled === false).map(s => s.id);
-const report = { target, signed_in_session: !!session, login_wall: loginWall, empty_screens: emptyScreens, unsettled, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+// A screen that asks for a password after we came in signed in may mean the app signed us out mid-crawl.
+const askedLater = usingSignIn ? screens.filter((s, i) => i > 0 && s.asks_password).map(s => s.id) : [];
+const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, login_wall: loginWall, empty_screens: emptyScreens, unsettled, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
@@ -195,6 +200,8 @@ for (const s of report.screens) {
 }
 if (loginWall) md.splice(1, 0, '', '> **Login wall:** every screen reached asks for a password. Stop and ask the owner for a way in (login.mjs), or audit only the sign-in screens and say so.');
 if (emptyScreens && emptyScreens * 2 >= screens.length) md.splice(1, 0, '', `> **Mostly empty:** ${emptyScreens} of ${screens.length} screens show little or no data. Density, pill and alignment problems hide on empty screens. Ask for an account with realistic data.`);
+if (askedLater.length) md.splice(1, 0, '', `> **Check the sign-in:** ${askedLater.join(', ')} ask for a password although the crawl started signed in. If that is the sign-in page, the app signed us out mid-crawl: run login.mjs again and crawl again.`);
+if (usingSignIn) md.splice(1, 0, '', `Signed in with ${opened.label}.`);
 if (unsettled.length) md.splice(1, 0, '', `> **Still loading:** ${unsettled.join(', ')} kept changing for 10 seconds. Their counts and empty messages may be the loading state, not the real data. Check them before citing.`);
 if (labelDrift.length) {
   md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
@@ -202,4 +209,4 @@ if (labelDrift.length) {
 }
 writeFileSync(join(outDir, 'crawl.md'), md.join('\n') + '\n');
 if (wantJson) console.log(JSON.stringify(report));
-else console.log(`crawl: ${report.screens.length} screens in ${outDir}${session ? ' (signed in)' : ''}${loginWall ? ' · LOGIN WALL: every screen asks for a password' : ''}${emptyScreens ? ` · ${emptyScreens} empty screen(s)` : ''}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);
+else console.log(`crawl: ${report.screens.length} screens in ${outDir}${usingSignIn ? ` (signed in with ${opened.label})` : ''}${loginWall ? ' · LOGIN WALL: every screen asks for a password' : ''}${emptyScreens ? ` · ${emptyScreens} empty screen(s)` : ''}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);

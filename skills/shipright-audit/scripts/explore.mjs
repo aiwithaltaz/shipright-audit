@@ -3,7 +3,9 @@
 // Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that
 // throws an error the moment you touch it. This finds them.
 // Usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes "#/,/settings"]
-//        [--session session.json] [--out dir] [--max 40] [--allow "Bookmark,Handoff"]
+//        [--profile dir] [--session session.json] [--out dir] [--max 40] [--allow "Bookmark,Handoff"]
+// --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
+// knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
 // (a dialog, menu, panel, new page, file picker, a change on the page, or nothing), console and network
 // errors caused by the click, and a screenshot when something opened. Then it puts the page back.
@@ -14,20 +16,19 @@
 // --allow names extra controls the owner said yes to. Icon-only controls are always hovered, never
 // clicked unless they have a safe name. File pickers and browser dialogs are cancelled.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { launch, loadPlaywright, settle, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--out', '--max', '--allow'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--session file] [--out dir] [--max 40] [--allow "Label,Label"]'); process.exit(2); }
+if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--profile dir] [--session file] [--out dir] [--max 40] [--allow "Label,Label"]'); process.exit(2); }
 const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'explore'));
 mkdirSync(outDir, { recursive: true });
-const session = flag('--session');
-if (session && !existsSync(session)) { console.error(`explore: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
+const { session, profile } = signInFlags(args, 'explore');
 const MAX = Number(flag('--max') || 40);
 const allow = (flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const OPENER = /\b(open|menu|more|options|settings|preferences|filter|sort|view|show|details|info|help|select|choose|picker|model|attach|tools|add|new|create|expand|collapse|sidebar|panel|search|budget|usage|context|account|profile|switch|tab|history|notifications?|microphone|voice|dictat\w*|speech|help)\b/i;
@@ -57,10 +58,14 @@ const STATE = () => {
   return { url: location.href, open, text: (document.body?.innerText || '').length };
 };
 
-const { chromium } = loadPlaywright('explore');
-const browser = await launch(chromium, {}, 'explore');
-const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(session ? { storageState: session } : {}) });
-const page = await context.newPage();
+let server, startUrl = target;
+if (!remote) {
+  server = await serve(root);
+  const rel = pagePath.slice(root.length).split(sep).join('/');
+  startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
+}
+const ctx = await openContext({ session, profile, name: 'explore', url: startUrl });
+const page = ctx.page;
 let errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
 page.on('pageerror', e => errs.push(e.message.slice(0, 200)));
@@ -70,12 +75,6 @@ let picker = false;
 page.on('filechooser', () => { picker = true; }); // listening stops the real picker from opening
 page.on('dialog', d => d.dismiss().catch(() => {}));
 
-let server, startUrl = target;
-if (!remote) {
-  server = await serve(root);
-  const rel = pagePath.slice(root.length).split(sep).join('/');
-  startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
-}
 const urls = [startUrl];
 for (const r of (flag('--routes') || '').split(',').map(s => s.trim()).filter(Boolean)) urls.push(/^https?:/.test(r) ? r : new URL(r, startUrl).href);
 if (flag('--crawl')) {
@@ -180,7 +179,7 @@ try {
     }
   }
 } finally {
-  await browser.close();
+  await ctx.close();
   if (server) server.close();
 }
 

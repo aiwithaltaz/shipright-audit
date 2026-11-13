@@ -1,24 +1,28 @@
 #!/usr/bin/env node
 // Scan a rendered page for inconsistent controls and off-scale spacing.
-// Usage: node <skill>/scripts/consistency.mjs <page.html|url> [--labels file.json]
+// Usage: node <skill>/scripts/consistency.mjs <page.html|url> [--labels file.json] [--tokens tokens.css]
+//        [--profile dir] [--session session.json]
+// --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. It stops with exit 3
+// if the app no longer knows us.
 // Labels file: { "remove": ["Remove"], "save": ["Save"] }. A data-action value must use one of those words.
 // Flags: same visible label with two background colors, off-scale margin or gap inside [data-measure],
 // badge colors that are not a hex token from --tokens, and label-table misses.
 // Exit 0 pass, 1 fail, 2 usage or missing Playwright.
 import { createRequire } from 'node:module';
-import { launch, loadPlaywright, settle, normUrl } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl } from './browser.mjs';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep } from 'node:path';
 
 const require = createRequire(import.meta.url);
 const args = process.argv.slice(2);
-const target = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--labels' && args[i - 1] !== '--tokens');
+const target = args.find((a, i) => !a.startsWith('--') && !['--labels', '--tokens', '--profile', '--session', '--out'].includes(args[i - 1]));
 if (!target) {
-  console.error('usage: node <skill>/scripts/consistency.mjs <page.html|url> [--labels file.json] [--tokens tokens.css]');
+  console.error('usage: node <skill>/scripts/consistency.mjs <page.html|url> [--labels file.json] [--tokens tokens.css] [--profile dir] [--session file]');
   process.exit(2);
 }
 const flag = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+const { session, profile } = signInFlags(args, 'consistency');
 const labels = flag('--labels') && existsSync(flag('--labels')) ? JSON.parse(readFileSync(flag('--labels'), 'utf8')) : {};
 const tokenHex = new Set();
 if (flag('--tokens') && existsSync(flag('--tokens'))) {
@@ -45,22 +49,23 @@ function serve(dir) {
   });
 }
 
-const { chromium } = loadPlaywright('consistency');
-const browser = await launch(chromium, { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] }, 'consistency');
-const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-let server;
+let server, url = target;
+if (!remote) {
+  server = await serve(root);
+  const rel = pagePath.slice(root.length).split(sep).join('/').replace(/^\/+/, '');
+  url = `http://127.0.0.1:${server.address().port}/${rel}`;
+}
+const opened = await openContext({ session, profile, name: 'consistency', url, launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] } });
+const page = opened.page;
+// The exit code is set here and used after the browser has closed: a sign-in profile only keeps the
+// newest token when the browser closes cleanly.
+let exitCode = 0;
 try {
-  let url = target;
-  if (!remote) {
-    server = await serve(root);
-    const rel = pagePath.slice(root.length).split(sep).join('/').replace(/^\/+/, '');
-    url = `http://127.0.0.1:${server.address().port}/${rel}`;
-  }
   const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
   if (!response || response.status() >= 400) {
     console.error('consistency: fail');
     console.error(`page did not load (${response ? response.status() : 'no response'}): ${url}`);
-    process.exit(1);
+    throw Object.assign(new Error('page did not load'), { quiet: true });
   }
   const facts = await page.evaluate(scale => {
     const rgb = value => {
@@ -120,10 +125,13 @@ try {
   if (fails.length) {
     console.error('consistency: fail');
     for (const line of fails) console.error(line);
-    process.exit(1);
-  }
-  console.log('consistency: pass');
+    exitCode = 1;
+  } else console.log('consistency: pass');
+} catch (e) {
+  if (!e.quiet) throw e;
+  exitCode = 1;
 } finally {
-  await browser.close();
+  await opened.close();
   if (server) server.close();
 }
+process.exit(exitCode);
