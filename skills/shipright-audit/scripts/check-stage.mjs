@@ -41,7 +41,7 @@ export function check(md, dir = null) {
 
   if (/<[a-z][^>]*>/i.test(md.replace(/```[\s\S]*?```/g, ''))) errors.push('Template placeholders like <app name> are still in the file. Replace every one.');
   for (const s of SECTIONS) if (!sections[s]) errors.push(`Missing section "## ${s}".`);
-  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:', 'Phone coverage:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
+  for (const f of ['Scope:', 'Out of scope:', 'Reviewers:', 'Controls opened:', 'Phone coverage:', 'Used as a user:']) if (!header.includes(f)) errors.push(`Header is missing "${f}". State it under the title.`);
 
   // Taste pass: a score and a reason for each of T1 to T9, and a short verdict above the table.
   if (sections['First impression']) {
@@ -141,6 +141,22 @@ export function check(md, dir = null) {
   if (nowIds.length && !themes.rows.length) errors.push('Themes: group the Now pains into 3 to 5 themes.');
   if (themes.rows.length && (themes.rows.length < 3 || themes.rows.length > 5) && nowIds.length >= 3) errors.push(`Themes: ${themes.rows.length} theme(s). Use 3 to 5.`);
 
+  // Used as a user: "yes (N actions)" needs every action listed in Left behind. "no" needs the Not verified line.
+  const usedLine = header.match(/Used as a user:\s*(yes|no)\b([^\n·|]*)/i);
+  let usedYes = false, usedCount = 0;
+  if (header.includes('Used as a user:')) {
+    if (!usedLine) errors.push('Header "Used as a user:" must read "yes (N actions)" or "no".');
+    else if (/yes/i.test(usedLine[1])) {
+      usedYes = true;
+      const n = usedLine[2].match(/\(\s*(\d+)\s+actions?\s*\)/i);
+      if (!n) errors.push('Header "Used as a user: yes" must give the count: "yes (N actions)".');
+      else usedCount = Number(n[1]);
+      const lbLines = sections['Left behind'] || [];
+      const listed = table(lbLines).rows.length + lbLines.filter(l => /^\s*[-*]\s+\S/.test(l) && !/^\s*[-*]\s+nothing\b/i.test(l)).length;
+      if (!listed) errors.push('Used as a user: yes, but Left behind lists nothing. List every switch flipped, every test message and every test item, so the owner can delete them.');
+    } else if (!/how features behave when used/i.test(notVerifiedText)) errors.push('Used as a user: no. Add this line to Not verified: "How features behave when used (switches, sending, results)".');
+  }
+
   if (dir) {
     const walk = d => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [n]; });
     const onDisk = new Set(walk(dir));
@@ -156,11 +172,20 @@ export function check(md, dir = null) {
     const find = (d, name, depth = 0) => { if (depth > 3 || !existsSync(d)) return null; for (const n of readdirSync(d)) { const p = join(d, n); if (n === name) return p; if (statSync(p).isDirectory()) { const f = find(p, name, depth + 1); if (f) return f; } } return null; };
     // Script leads ledger: no lead a script measured may vanish without a decision.
     let leads = [];
+    const findAll = (d, name, depth = 0) => { if (depth > 4 || !existsSync(d)) return []; return readdirSync(d).flatMap(n => { const p = join(d, n); return n === name ? [p] : (statSync(p).isDirectory() ? findAll(p, name, depth + 1) : []); }); };
     for (const name of ['visual.json', 'explore.json', 'samples.json']) {
       const f = find(dir, name);
       if (!f) continue;
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || v.findings || []).map(l => l.id)); } catch {}
     }
+    // Every task walk has its own walk.json. Result checks after owner-approved actions are leads too.
+    let scriptActions = 0;
+    for (const f of findAll(dir, 'walk.json')) {
+      try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || []).map(l => l.id)); scriptActions += (v.used_actions || []).length; } catch {}
+    }
+    try { const ex = find(dir, 'explore.json'); if (ex) scriptActions += JSON.parse(readFileSync(ex, 'utf8')).use?.switches_flipped || 0; } catch {}
+    if (scriptActions && !usedYes) errors.push(`Header says "Used as a user: no", but the scripts flipped switches or ran owner-approved steps (${scriptActions} action(s)). Write "Used as a user: yes (${scriptActions} actions)" and list them in Left behind.`);
+    else if (scriptActions && usedCount < scriptActions) errors.push(`Header says "Used as a user: yes (${usedCount} actions)", but the scripts recorded ${scriptActions}. Count every flipped switch and every owner-approved step.`);
     leads = [...new Set(leads)];
     if (leads.length) {
       const heading = sections['Script leads'] ? 'Script leads' : (sections['Visual leads'] ? 'Visual leads' : null);
@@ -200,7 +225,7 @@ export function check(md, dir = null) {
 function selfTest() {
   const good = `# Pain map: Demo
 Audited: 2026-10-23 · Screens in scope: 2 · Tasks walked: 3 · Controls opened: 12 of 14 · Reviewers: 1 · Method: crawl
-Phone coverage: 1 of 1 in-scope screens
+Phone coverage: 1 of 1 in-scope screens · Used as a user: no
 Scope: booking
 Out of scope: admin
 Context used: none given
@@ -273,6 +298,7 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
 
 ## Not verified
 - Screen reader behavior
+- How features behave when used (switches, sending, results)
 
 ## Left behind
 - Nothing: no test data was created
@@ -288,7 +314,7 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     .replace('| T9 Area | 3 | fine but plain here |', '')
     .replace('| T8 Area | 3 | fine but plain here |', '| T8 Area | 7 | x |')
     .replace('Controls opened: 12 of 14 · ', '')
-    .replace('Phone coverage: 1 of 1 in-scope screens\n', '')
+    .replace('Phone coverage: 1 of 1 in-scope screens · Used as a user: no\n', '')
     .replace('screens/home-1280.png, screens/home-390.png |', 'screens/home-1280.png |')
     .replace('| Reminders | Text and email | Email | Differs on purpose: owner\'s clients prefer email |', '| Reminders | Text and email | Email | Different |')
     .replace('| Search | Search by service | Search by service | Matches |', '')
@@ -316,10 +342,27 @@ Leaders compared: Calendly, Booksy, Square Appointments (what local salons use)
     ['a wrong coverage count fails', check(good.replace('Phone coverage: 1 of 1', 'Phone coverage: 6 of 6')).some(e => e.includes('Write "Phone coverage: 1 of 1'))],
     ['a 390 screenshot that is not on disk fails', check(good.replace('screens/home-390.png |', 'screens/gone-390.png |'), d).some(e => e.includes('gone-390.png does not exist'))],
   ];
+  // Used as a user: yes needs a count and a Left behind list; no needs the Not verified line; and the
+  // header may not say no when the scripts recorded owner-approved actions.
+  const yes = good.replace('Used as a user: no', 'Used as a user: yes (3 actions)');
+  const listed = yes.replace('- Nothing: no test data was created', '| Where | What I created or changed | Removed? |\n|---|---|---|\n| The app | Test message "ShipRight test" in a new chat | no, delete it from the chat list |\n| The app | Switches Web search and Images flipped and turned back | yes |');
+  const d3 = mkdtempSync(join(tmpdir(), 'gate-use-'));
+  for (const sub of ['screens', 'walks', 'walks/send']) mkdirSync(join(d3, sub));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d3, f), '');
+  writeFileSync(join(d3, 'walks/send/walk.json'), JSON.stringify({ used_actions: [{ step: 1 }, { step: 2 }], leads: [{ id: 'W-send-1' }] }));
+  cov.push(
+    ['used: yes with nothing in Left behind fails', check(yes).some(e => e.includes('Left behind lists nothing'))],
+    ['used: yes with a count and a list passes', check(listed).length === 0],
+    ['used: yes without a count fails', check(listed.replace('yes (3 actions)', 'yes')).some(e => e.includes('must give the count'))],
+    ['used: no without the Not verified line fails', check(good.replace('- How features behave when used (switches, sending, results)\n', '')).some(e => e.includes('How features behave when used'))],
+    ['used: no fails when a walk recorded owner-approved steps', check(good, d3).some(e => e.includes('the scripts flipped switches or ran owner-approved steps (2 action(s))'))],
+    ['a result lead from a walk must be decided', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n', d3).some(e => e.includes('W-send-1 not decided'))],
+    ['a decided walk lead passes', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| W-send-1 | media | P01 |\n', d3).length === 0],
+  );
   const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
-  console.log(covFailed.length === 0 ? `PASS  phone coverage: ${cov.length} cases` : `FAIL  phone coverage: ${covFailed.join(', ')}`);
+  console.log(covFailed.length === 0 ? `PASS  phone coverage and used-as-a-user: ${cov.length} cases` : `FAIL  phone coverage and used-as-a-user: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
-  const expect = ['Controls opened:', 'Phone coverage:', 'has no 390 screenshot', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
+  const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'verdict must be Matches', 'Compare at least 6', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
   console.log(g.length === 0 ? 'PASS  good pain map passes' : `FAIL  good pain map: ${g.join(' | ')}`);
   console.log(missing.length === 0 ? `PASS  bad pain map caught all ${expect.length} problems` : `FAIL  bad pain map missed: ${missing.join(', ')}`);

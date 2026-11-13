@@ -1,7 +1,7 @@
 # Pain map: <app name>
 
 Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Controls opened: <n of m> · Reviewers: <n> · Method: <crawl / by hand / screenshots> · Widths seen: <390, 1280, or the width you actually saw> · Data: <realistic / sparse / empty>
-Phone coverage: <x of y> in-scope screens
+Phone coverage: <x of y> in-scope screens · Used as a user: <yes (n actions) / no>
 Scope: <the core tasks audited>
 Out of scope: <what was not audited>
 Context used: <users, business goal, analytics, owner complaints: or "none given">
@@ -76,9 +76,10 @@ One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##) and `sa
 ## Not verified
 
 - <what could not be checked, and why>
+- <if the app was not used as a user: How features behave when used (switches, sending, results)>
 
 ## Left behind
 
 | Where | What I created or changed | Removed? |
 |---|---|---|
-| <the app or the folder> | <a test item, a draft, Playwright packages, .session.json> | <yes, or no and why> |
+| <the app or the folder> | <every test message and test item, every switch flipped and turned back, a draft, Playwright packages, .session.json, the sign-in profile folder> | <yes, or no and why> |

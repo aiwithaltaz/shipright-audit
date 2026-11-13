@@ -40,7 +40,7 @@ Audit progress:
 ## Rules that never bend
 
 - **Read-only code.** Do not edit app files, add packages to the app's project, deploy or push. Write only inside `<audit>/`. If any tool you use saves files elsewhere (for example a browser tool's own folder such as `.playwright-mcp`), move them into `<audit>/` before you finish and list them in Left behind. Prefer the scripts here over other browser tools.
-- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus, reading pages and typing in search boxes are fine. Do not type into composers, editors or forms: many autosave. Keep a list of everything you create or change.
+- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, flips a switch, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus, reading pages and typing in search boxes are fine. Do not type into composers, editors or forms: many autosave. Keep a list of everything you create or change.
 - **Evidence for every pain.** A pain needs a screen and a screenshot that exists on disk. No evidence, no pain.
 - **Only claim what you finished.** Never say you checked something you did not. If a width, a state or a flow was not seen, it goes in Not verified, never in the findings.
 - **No invented facts.** No made-up user quotes, complaints, metrics or analytics.
@@ -63,7 +63,10 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported.
-6. **The core promise.** If the app's main promise can only be checked by doing the thing (send a message, run an automation, place a test booking), ask once, after the crawl: "May I do <1 or 2 named actions> to check <the promise>? They will show in your account, and I'll list them." Default is no. On yes, mark those steps `"owner_said_yes": true` and list them in Left behind.
+6. **Use it like a real user: one question.** Looking is not enough: most of what owners complain about is what happens when you use a feature. Ask once, after the crawl, in these words: "Can I use the app like a real user? I would flip the switches in menus and turn them back, send up to 3 short test messages, and make 1 test item. Estimated cost: under $1. Everything I create will be listed so you can delete it. (Default: no.)" Do not wait long: if there is no answer, the answer is no, and you go on.
+   - **On yes:** run Step 1b with `--use`, and mark the test-message steps in Step 3 `"owner_said_yes": true`. Stay inside what was asked: at most 3 short test messages (say they are tests, for example "ShipRight test: please ignore") and 1 test item. The header says `Used as a user: yes (N actions)`, and Left behind lists every test message, every test item and every switch flipped.
+   - **On no (or no answer):** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
+   - **Never, even on yes:** publish, send email or messages to other people, delete, pay, invite, connect an account, or change account settings. Each of those needs its own exact yes.
 
 If the owner gives instructions at any point (what to skip, what is allowed), follow them and say which reading you took.
 
@@ -94,6 +97,7 @@ Audits miss what they never open: a dialog behind an icon, a button that does no
 - It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
 - Read `explore.md`. Open the **not clicked** controls yourself when the name makes the effect clear and it cannot save, send or spend: a dialog that asks before it saves is safe to open and close. Look inside everything that opened: the confusing part is often the panel, not the button.
 - Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
+- **Switches are never flipped without the owner's yes.** After a yes to the Step 0 question, run it again with `--use`: it flips each switch in the menus it opens and on the page, waits for the page to settle, records what changed on screen (new chips, new panels, text near the message box, the URL) with before and after screenshots, then turns it back and checks it is back. A switch that adds something visible away from itself is a `toggle-side-effect` lead. It skips switches on settings and account screens and ones with risky or account-wide names: those need their own yes. If a switch could not be turned back, tell the owner at once and list it in Left behind.
 - Put the totals in the header: "Controls opened: N of M". `explore.md` prints the line to copy.
 
 ## Step 1c: Open existing results (read-only)
@@ -119,6 +123,7 @@ Walk each task as a first-time user, start to finish. Record every step: clicks,
 2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [sign-in] --out <audit>/walks/<task>`.
 3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
 4. Use those step screenshots as evidence for pains inside the flow.
+5. **Test messages (only after the owner's yes).** A step with `"owner_said_yes": true` runs once, at 1280, so the app gets one test message, not two. After an owner-approved click or key press the walker waits for the result to settle, then checks it at 1280 and at 390: media that loaded, text that is not cut off, action buttons with names. Each problem is a lead (`W-...`) in `walk.md`: decide it in Script leads. Open the `*-result.png` screenshots too and judge the result yourself.
 
 Ask the big question first: does the product support the user's real job? A polished screen in the wrong flow is still a Blocker.
 
@@ -209,7 +214,8 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
-- [ ] Every script lead (visual V##, explore E##, existing results R##) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] Every script lead (visual V##, explore E##, existing results R##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] The header says "Used as a user: yes (N actions)" or "no". On yes, Left behind lists every action. On no, Not verified says "How features behave when used (switches, sending, results)".
 - [ ] Category conventions has at least 6 rows, each with a verdict.
 - [ ] The header says how many controls were opened.
 - [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.

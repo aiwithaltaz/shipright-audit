@@ -224,6 +224,37 @@ if (hasPw) {
   ok('crawl reaches Settings past a long list of items', paths.includes('/settings') && paths.includes('/library') && paths.filter(p => p.startsWith('/c/')).length === 6 && mc.item_lists?.[0]?.links === 14, `${paths.join(' ')}`);
 }
 
+// 17. Used as a user (only with the owner's yes). A menu switch that adds a chip to the message box:
+// with --use it is a toggle-side-effect lead and every switch ends as it started; without --use nothing
+// is flipped. A test message marked owner_said_yes is sent once, and its result is checked at both widths.
+if (hasPw) {
+  const hits = [];
+  const useApp = createServer((req, res2) => { if (req.url.startsWith('/api/use')) { hits.push(decodeURIComponent(req.url.split('?')[1] || '')); res2.writeHead(204); return res2.end(); } if (req.url !== '/') { res2.writeHead(404); return res2.end(); } res2.writeHead(200, { 'content-type': 'text/html' }); res2.end(readFileSync(join(root, 'tests/fixtures/use-app/index.html'))); });
+  await new Promise(r2 => useApp.listen(0, '127.0.0.1', r2));
+  const useUrl = `http://127.0.0.1:${useApp.address().port}/`;
+  const go = a => new Promise(res => { const p = spawn(process.execPath, a, { cwd: root }); p.on('close', code => res(code)); });
+  const u0 = mkdtempSync(join(tmpdir(), 'use-off-')), u1 = mkdtempSync(join(tmpdir(), 'use-on-'));
+  await go(['skills/shipright-audit/scripts/explore.mjs', useUrl, '--out', u0]);
+  const off = JSON.parse(readFileSync(join(u0, 'explore.json'), 'utf8'));
+  ok('without --use, no switch is flipped', hits.length === 0 && off.use.enabled === false && off.use.switches_flipped === 0 && !off.leads.some(l => l.kind === 'toggle-side-effect'), `${hits.length} flip(s) reached the app`);
+  hits.length = 0;
+  await go(['skills/shipright-audit/scripts/explore.mjs', useUrl, '--use', '--out', u1]);
+  const on = JSON.parse(readFileSync(join(u1, 'explore.json'), 'utf8'));
+  const side = on.leads.filter(l => l.kind === 'toggle-side-effect');
+  const flips = on.switches.filter(t => t.flipped);
+  const perSwitch = n => hits.filter(h => h === `switch=${n}`).length;
+  ok('--use: a menu switch that adds a chip to the message box is a toggle-side-effect lead', side.length === 1 && /Web search/.test(side[0].what) && /next to the message box/.test(side[0].what) && side[0].detail.switches.join() === 'Web search,Images' && existsSync(join(u1, side[0].shot)), side.map(l => l.what).join(' | ') || 'no lead');
+  ok('--use: every switch ends in its original state', flips.length === 4 && flips.every(t => t.restored && t.final === t.before && t.shots.before && t.shots.after) && ['Web search', 'Images', 'Notes', 'compact'].every(n => perSwitch(n) === 2) && on.use.turned_back === 4, `${flips.length} flipped, ${on.use.turned_back} turned back, ${hits.length} flips reached the app`);
+  hits.length = 0;
+  const wdir = mkdtempSync(join(tmpdir(), 'use-walk-')), wplan = join(wdir, 'plan.json');
+  writeFileSync(wplan, JSON.stringify({ task: 'Send a test message', steps: [{ do: 'fill', field: 'Message', value: 'ShipRight test: please ignore', owner_said_yes: true }, { do: 'click', text: 'Send', owner_said_yes: true }, { do: 'expect', text: 'Here is a picture' }] }));
+  const wcode = await go(['skills/shipright-audit/scripts/walk.mjs', useUrl, wplan, '--out', join(wdir, 'out')]);
+  useApp.close();
+  const wj = JSON.parse(readFileSync(join(wdir, 'out', 'walk.json'), 'utf8'));
+  const kindsAt = wj.leads.map(l => `${l.kind}@${l.widths.join('+')}`).sort().join(' ');
+  ok('an owner-approved test message is sent once and its result is checked at both widths', wcode === 0 && hits.length === 1 && wj.used_actions.length === 2 && wj.widths['390'].once_at === 1 && wj.widths['390'].broke_at === null && kindsAt === 'clipped-text@390 media-not-loaded@1280+390 unnamed-action@1280+390' && existsSync(join(wdir, 'out', '390-02-result.png')), `exit ${wcode}, ${hits.length} message(s) sent, ${kindsAt}`);
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);

@@ -22,10 +22,18 @@
 // Live apps (http/https): the walk will not click risky words (publish, send, delete, generate, save...)
 // and will not type into fields other than search boxes, unless that step has "owner_said_yes": true.
 // A step it refuses is logged as "held back" and the walk stops there without counting it as a break.
+// Using the app like a real user (only after the owner said yes): mark each such step
+// "owner_said_yes": true, for example typing a short test message and pressing Send.
+//   - Those steps run once, at 1280. The 390 walk stops there, so the app gets one test message, not two.
+//   - After an owner-approved click or key press it waits for the result to settle (a streaming answer
+//     included), then checks the result at 1280 and at 390: media that never loaded, clipped text, and
+//     action buttons with no name. Each problem is a lead (W-...) to decide in the pain map's Script leads.
+//   - walk.json and walk.md list every owner-approved action under "used_actions": copy them into
+//     Left behind and count them in the header's "Used as a user: yes (N actions)".
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, analyzeScript, mergeLeads, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -101,6 +109,37 @@ async function findField(page, field) {
 // context that starts from the newest sign-in state (the app may have swapped its token during the last
 // width). With no sign-in each width starts fresh.
 let carried = null;
+const WIDTHS = [1280, 390];
+const usedActions = [], resultFindings = [];
+const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
+// Wait for a result to finish: the page stops changing, twice in a row with a pause between (a streamed
+// answer can pause while a tool runs), and no "Stop" button is left on screen.
+async function settleResult(page) {
+  const start = Date.now();
+  await settle(page, { timeout: 60000 });
+  while (Date.now() - start < 90000) {
+    await page.waitForTimeout(1500);
+    const busy = await page.evaluate(() => [...document.querySelectorAll('button, [role=button]')].some(b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 && /^stop( generating| responding| response)?$/i.test((b.innerText || b.getAttribute('aria-label') || '').trim()); })).catch(() => false);
+    const calm = await settle(page, { timeout: 15000 });
+    if (!busy && calm) return true;
+  }
+  return false;
+}
+// The checks from "open existing results", on the result an owner-approved action just produced.
+async function checkResult(page, n, width) {
+  for (const w of [width, ...WIDTHS.filter(x => x !== width)]) {
+    if (w !== width) { await page.setViewportSize({ width: w, height: w === 390 ? 844 : 800 }); await settle(page, { timeout: 4000 }); }
+    const file = `${w}-${String(n).padStart(2, '0')}-result.png`;
+    await page.screenshot({ path: join(outDir, file), fullPage: true }).catch(() => null);
+    const a = await page.evaluate(analyzeScript({ results: true, only: ['media-not-loaded', 'clipped-text', 'unnamed-action'] })).catch(() => ({ findings: [] }));
+    for (const f of a.findings) {
+      const shot = `${w}-${String(n).padStart(2, '0')}-result-${f.kind}-${resultFindings.length + 1}.png`;
+      if (f.mark) await page.locator(`[data-srv="${f.mark}"]`).first().screenshot({ path: join(outDir, shot), timeout: 5000 }).catch(() => null);
+      resultFindings.push({ id: `W${resultFindings.length + 1}`, page: page.url(), width: w, kind: f.kind, what: `After step ${n}: ${f.what}`, group: `${n}|${f.group || f.what}`, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : file });
+    }
+  }
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
+}
 async function walkAt(opened, startUrl, width) {
   const viewport = { width, height: width === 390 ? 844 : 800 };
   const own = opened.mode === 'profile' ? null : await opened.browser.newContext({ viewport, ...(opened.mode === 'session' ? { storageState: carried || await opened.context.storageState() } : {}) });
@@ -112,7 +151,7 @@ async function walkAt(opened, startUrl, width) {
   await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   await settle(page);
   const log = [];
-  let actions = 0, brokeAt = null, heldAt = null;
+  let actions = 0, brokeAt = null, heldAt = null, onceAt = null;
   const shot = async n => { const file = `${width}-${String(n).padStart(2, '0')}.png`; await page.screenshot({ path: join(outDir, file) }); return file; };
   log.push({ n: 0, do: 'start', ok: true, url: page.url(), h1: await h1(page), shot: await shot(0) });
   for (let i = 0; i < plan.steps.length; i++) {
@@ -125,6 +164,11 @@ async function walkAt(opened, startUrl, width) {
       entry.ok = false; entry.held = true;
       entry.error = s.do === 'click' ? `held back: "${s.text}" could change the live app. Needs the owner's yes.` : `held back: typing into "${s.field}" in a live app may autosave. Needs the owner's yes.`;
       log.push(entry); heldAt = n; break;
+    }
+    // Owner-approved actions run once, at the first width. Later widths stop here.
+    if (s.owner_said_yes && width !== WIDTHS[0]) {
+      entry.once = true; entry.note = `not repeated at ${width}: owner-approved actions run once, at ${WIDTHS[0]}. The result was checked at both widths there.`;
+      log.push(entry); onceAt = n; break;
     }
     try {
       if (s.do === 'goto') {
@@ -154,6 +198,11 @@ async function walkAt(opened, startUrl, width) {
       entry.ok = false; entry.error = String(e.message || e).split('\n')[0].slice(0, 200);
     }
     if (s.do !== 'note') await settle(page, { timeout: 6000 });
+    if (s.owner_said_yes && entry.ok && ['click', 'fill', 'select', 'press'].includes(s.do)) {
+      usedActions.push({ step: n, do: s.do, target: entry.target, ...(s.value !== undefined ? { value: String(s.value) } : {}), ...(s.option !== undefined ? { value: String(s.option) } : {}) });
+      // A click or a key press is what sends: wait for the result, then check it at both widths.
+      if (s.do === 'click' || s.do === 'press') { entry.result_settled = await settleResult(page); await checkResult(page, n, width); }
+    }
     entry.url = page.url(); entry.h1 = await h1(page);
     if (s.do !== 'note') entry.shot = await shot(n);
     log.push(entry);
@@ -161,7 +210,7 @@ async function walkAt(opened, startUrl, width) {
   }
   if (own && opened.mode === 'session') carried = await own.storageState().catch(() => carried);
   if (own) await own.close(); else await page.close().catch(() => {});
-  return { width, actions, broke_at: brokeAt, held_at: heldAt, finished: brokeAt === null && heldAt === null, steps: log, console_errors: [...new Set(errors)] };
+  return { width, actions, broke_at: brokeAt, held_at: heldAt, once_at: onceAt, finished: brokeAt === null && heldAt === null && onceAt === null, steps: log, console_errors: [...new Set(errors)] };
 }
 const h1 = page => page.locator('h1').first().innerText({ timeout: 1000 }).then(t => t.replace(/\s+/g, ' ').trim().slice(0, 120)).catch(() => '');
 
@@ -176,18 +225,22 @@ let runs;
 try { runs = [await walkAt(opened, startUrl, 1280), await walkAt(opened, startUrl, 390)]; }
 finally { await opened.close(); if (server) server.close(); }
 
-const report = { task: plan.task || slug, target, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
+const leads = mergeLeads(resultFindings, WIDTHS, local);
+leads.forEach((l, i) => { l.id = `W-${slug.slice(0, 20)}-${i + 1}`; });
+const report = { task: plan.task || slug, target, signed_in_with: opened.mode !== 'none' ? opened.label : null, used_actions: usedActions, leads, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
 writeFileSync(join(outDir, 'walk.json'), JSON.stringify(report, null, 2) + '\n');
 const [d, p] = runs;
-const state = r => r.broke_at ? `broke at step ${r.broke_at}` : r.held_at ? `held back at step ${r.held_at} (needs the owner's yes)` : 'finished';
-const cell = (r, n) => { const e = r.steps.find(x => x.n === n); if (!e) return 'not reached'; return `${e.ok ? 'ok' : (e.held ? 'HELD: ' : 'FAIL: ') + e.error}${e.shot ? ` (${e.shot})` : ''}`; };
+const state = r => r.broke_at ? `broke at step ${r.broke_at}` : r.held_at ? `held back at step ${r.held_at} (needs the owner's yes)` : r.once_at ? `stopped at step ${r.once_at} (owner-approved actions run once, at ${WIDTHS[0]})` : 'finished';
+const cell = (r, n) => { const e = r.steps.find(x => x.n === n); if (!e) return 'not reached'; if (e.once) return 'not repeated (done once at 1280)'; return `${e.ok ? 'ok' : (e.held ? 'HELD: ' : 'FAIL: ') + e.error}${e.shot ? ` (${e.shot})` : ''}`; };
 const md = [`# Walk: ${report.task}`, '', `Desktop: ${state(d)}, ${d.actions} actions · Phone: ${state(p)}, ${p.actions} actions`, '',
   '| Step | Action | 1280 | 390 |', '| --- | --- | --- | --- |',
   ...plan.steps.map((s, i) => `| ${i + 1} | ${s.do} ${(s.text || s.field || s.to || s.key || '').replace(/\|/g, '/')} | ${cell(d, i + 1)} | ${cell(p, i + 1)} |`)];
+if (usedActions.length) md.push('', '## Used as a user (the owner said yes)', '', `${usedActions.length} action(s). List each one in Left behind and count them in the header's "Used as a user: yes (N actions)".`, '', ...usedActions.map(a => `- Step ${a.step}: ${a.do} "${a.target}"${a.value !== undefined ? `, value "${a.value}"` : ''}`));
+if (usedActions.length) md.push('', '## Result checks (decide each lead in Script leads)', '', '| Lead | Check | What it found | Widths | Screenshot |', '| --- | --- | --- | --- | --- |', ...(leads.length ? leads.map(l => `| ${l.id} | ${l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.widths.join(', ')} | ${l.shot || 'none'} |`) : ['| none | | The result loaded its media, no text was cut off and every action had a name | | |']), '', 'Open the `*-result.png` screenshots too: the checks cannot judge whether the result is right.');
 const notes = plan.steps.filter(s => s.do === 'note').map(s => `- ${s.text}`);
 if (notes.length) md.push('', '## Notes', '', ...notes);
 const errs = [...new Set([...d.console_errors, ...p.console_errors])];
 if (errs.length) md.push('', '## Console errors', '', ...errs.map(e => `- ${e}`));
 writeFileSync(join(outDir, 'walk.md'), md.join('\n') + '\n');
-console.log(`walk: "${report.task}" · 1280 ${state(d)} (${d.actions} actions) · 390 ${state(p)} (${p.actions} actions) · ${outDir}`);
+console.log(`walk: "${report.task}" · 1280 ${state(d)} (${d.actions} actions) · 390 ${state(p)} (${p.actions} actions)${usedActions.length ? ` · used as a user: ${usedActions.length} action(s), ${leads.length} result lead(s)` : ''} · ${outDir}`);
 process.exit(d.broke_at || p.broke_at ? 1 : 0);
