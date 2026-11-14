@@ -6,12 +6,13 @@ Owners judge their app against the apps their users already know: "ChatGPT puts 
 
 1. **Name the category** in the app's own words: AI chat assistant, booking, CRM, online store, analytics dashboard, content or creator tool, marketplace, landing page, internal admin.
 2. **Pick 3 to 5 leaders** this app's users most likely use. Say why each one.
-3. **List what the leaders do** for each core task and each main screen area: where the main action sits, what the navigation holds, what the first screen shows, what settings contain, how sign-in works. If you can search the web or open their sites, do it and cite what you saw. If not, write "from knowledge, not checked today" next to the claim.
-4. **Compare, row by row,** in the pain map's **Category conventions** table: at least 6 rows. Each row ends in one verdict:
+3. **Research them live.** When you have a web search or a web fetch tool, you must use it: for each leader, open its help pages or product pages and read how the feature works today. Leaders change every month, and what you remember is often a version old. Write the URL you opened and the date you checked it in the **Source** column, like `https://help.example.com/tools (checked 2026-11-12)`. Only when no web tool exists may a row say "from knowledge, not checked today", and then the header says "Competitor research: from knowledge, no web tool".
+4. **List what the leaders do** for each core task and each main screen area: where the main action sits, what the navigation holds, what the first screen shows, what settings contain, how sign-in works. Then, for every main feature the app has, how it works (C3).
+5. **Compare, row by row,** in the pain map's **Category conventions** table: at least 10 rows. Each row has a **Kind** ("Where it sits" or "How it works"; at least 3 rows are "How it works"), a **Source**, and ends in one verdict:
    - **Matches.**
-   - **A pain ID**, when the app differs and users will stumble (lens: "Conventions: C1").
-   - **Differs on purpose:** the reason, when the difference is the product's own idea. Ask: does it help the user, or is it just different?
-5. **Expected features missing.** Things every leader has and users will look for (Google sign-in, search, an effort or quality control, undo) go in Missing, with the leaders that have them.
+   - **A pain ID**, when the app differs and users will stumble (lens: "Conventions: C1" for where it sits, "Conventions: C3" for how it works).
+   - **Differs on purpose:** the reason, when the difference is the product's own idea. Ask: does it help the user, or is it just different? If the owner wrote the reason down (see owner-rules.md), quote it.
+6. **Expected features missing.** Things the leaders have and users will look for (Google sign-in, search, an effort or quality control, undo, a way to make your own with help) go in Missing, under **What leaders have that this app doesn't**, with the leaders named and linked.
 
 ## C2. Where does each thing belong? (information architecture)
 
@@ -25,6 +26,18 @@ Check every navigation item, panel and setting against these:
 - **IA6. Every icon in a navigation rail has a visible label,** or at least a tooltip and a name for screen readers. Icon-only rails work only for the 3 or 4 symbols everyone knows (home, search, settings, profile).
 
 A pain from this check uses the lens "IA: IA#".
+
+## C3. How it works (behavior, not only placement)
+
+Two apps can put a feature in the same place and still work very differently. Owners notice: "there it is one switch for good, here I flip it in every chat". For every main feature the app has, research how 2 or more leaders handle it, and compare. Ask these 5 questions:
+
+1. **Set once, or every time?** Is it set once for the account, or again for each chat, item or session?
+2. **How is it called up?** A menu, a typed shortcut such as "/" or "@", a button, or by itself when it is needed?
+3. **How does a result show, and what happens before anything is sent or changed?** Does it act at once, or show a draft first and wait for a confirm?
+4. **How do users make their own?** Can they create one with help ("create with AI"), import one, or start from a template?
+5. **What does it look like on phone?** The same controls, fewer, or a different layout?
+
+Each answer that differs from the leaders is a row in **Category conventions** with Kind "How it works": a pain (lens "Conventions: C3"), or "Differs on purpose:" with the reason. You can only answer these by using the feature or reading how it works: looking at where it sits is not enough. If you could not use the feature (the owner said no to "use the app like a real user"), compare what you can see and put the rest in Not verified.
 
 ## Starter checklists
 

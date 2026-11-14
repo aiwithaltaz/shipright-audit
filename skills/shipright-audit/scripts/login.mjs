@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Let the owner sign in by hand, then save the session so crawl, walk and visual can work behind the login.
+// Let the owner sign in by hand, then keep the sign-in so crawl, explore, visual, consistency, samples and
+// walk can work behind the login.
 // Claude never sees or types the password: the owner signs in in a real browser window.
 // Usage: node <skill>/scripts/login.mjs <url> [--out <audit>/.session.json] [--timeout 300]
 //        [--profile dir]  where the window keeps its browser profile (default ~/.shipright/profiles/<site>)
@@ -8,12 +9,15 @@
 // Chromium only if neither starts), without the "controlled by automated software" flag. Sign-in with
 // Google and other pop-up logins refuse or loop in a throwaway automated window, so this matters.
 // The profile is kept, so the next audit of the same site usually opens already signed in.
+// It prints the profile path and the browser it used: the other scripts take that path as --profile and
+// reopen the same profile in the same browser, so they are signed in even when the app swaps its
+// sign-in token on every refresh. The saved session file (--session) is the fallback.
 // It saves once the page looks signed in (no password field, not on a login URL) twice in a row.
 // Closing the window saves only if it was signed in by then.
 // The session file and the profile hold login cookies: delete them when you are done
 // (the session file, and ~/.shipright/profiles).
 // Exit 0 saved, 1 not signed in, 2 usage or no screen to open a window on.
-import { loadPlaywright, TOOLS_DIR } from './browser.mjs';
+import { loadPlaywright, looksSignedIn as signedInOn, profileFor, noteProfile } from './browser.mjs';
 import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 
@@ -28,25 +32,27 @@ if (!headless && process.platform === 'linux' && !process.env.DISPLAY && !proces
   console.error('login: no screen here to open a browser window on. Run this on the computer you use, or ask the owner for another way in.');
   process.exit(2);
 }
-const site = new URL(url).hostname.replace(/[^a-z0-9.-]/gi, '_');
-const profile = resolve(flag('--profile') || join(dirname(TOOLS_DIR), 'profiles', site));
+const profile = resolve(flag('--profile') || profileFor(url));
 mkdirSync(profile, { recursive: true });
 
 const { chromium } = loadPlaywright('login');
 const LABEL = { msedge: 'Microsoft Edge', chrome: 'Google Chrome', chromium: "Playwright's Chromium" };
 const wanted = (process.env.SHIPRIGHT_BROWSER || '').trim().toLowerCase();
 const order = [...new Set([wanted, 'msedge', 'chrome', 'chromium'].filter(c => LABEL[c]))];
-let context = null;
+let context = null, used = null;
 const tried = [];
 for (const channel of order) {
   try {
     context = await chromium.launchPersistentContext(profile, {
       headless,
-      ...(channel === 'chromium' ? {} : { channel }),
+      // In --headless test mode, "chromium" must still be the full browser, not Playwright's headless
+      // shell: the other scripts reopen this profile with the full browser, and the two cannot share cookies.
+      ...(channel === 'chromium' && !headless ? {} : { channel }),
       viewport: null,
       ignoreDefaultArgs: ['--enable-automation'],
       args: ['--disable-blink-features=AutomationControlled', '--no-first-run', '--no-default-browser-check'],
     });
+    used = channel;
     console.error(`login: using ${LABEL[channel]}${tried.length ? ` (could not start: ${tried.join(', ')})` : ''}`);
     break;
   } catch (e) {
@@ -61,12 +67,9 @@ await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 console.log('login: a browser window is open. Sign in there as you normally would, Google sign-in included.');
 console.log('login: it saves by itself once you are signed in. Leave the window open until it closes.');
 
-const LOGIN_URL = /login|sign-?in|signin|auth|sso|oauth/i;
-const looksSignedIn = async () => {
-  if (page.isClosed()) return false;
-  const hasPassword = await page.locator('input[type=password]').first().isVisible().catch(() => false);
-  return !hasPassword && !LOGIN_URL.test(new URL(page.url()).pathname);
-};
+// The other scripts reopen this profile in the same browser, so leave a note saying which one made it.
+noteProfile(profile, { channel: used, site: new URL(url).hostname });
+const looksSignedIn = () => signedInOn(page);
 const save = async state => {
   mkdirSync(dirname(out), { recursive: true });
   writeFileSync(out, JSON.stringify(state, null, 2));
@@ -92,8 +95,10 @@ while (Date.now() - started < timeoutMs) {
 const ok = !!last && (signedIn || (closed && wasIn));
 if (ok) {
   await save(last);
-  console.log(`login: saved the session to ${out}. Use it with --session ${out}`);
-  console.log('login: this file holds your login cookies. Keep it out of git and delete it after the audit.');
+  console.log(`login: signed in. Profile: ${profile} · Browser: ${LABEL[used]} (${used})`);
+  console.log(`login: next scripts: --profile "${profile}" --session "${out}"`);
+  console.log('login: the profile always holds the newest sign-in. The session file is the fallback: apps that swap their sign-in token make it stale within seconds.');
+  console.log('login: both hold your login cookies. Keep them out of git and delete them after the audit.');
 }
 await context.close().catch(() => {});
 if (!ok) {

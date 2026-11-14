@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Trip helper</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+.shell { display: flex; min-height: 100vh; }
+aside { width: 220px; border-right: 1px solid #ddd; padding: 16px; flex: none; }
+aside a { display: block; padding: 6px 0; color: #1c1c1c; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+main { flex: 1; min-width: 0; padding: 24px; max-width: 760px; }
+.reply { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.reply-footer { margin-top: 12px; font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; }
+.chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 16px 0; }
+.chips button { flex: none; padding: 6px 12px; border: 1px solid #bbb; border-radius: 999px; background: #fff; }
+pre { overflow-x: auto; background: #f4f4f4; padding: 12px; border-radius: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 700px) { aside { display: none; } main { padding: 16px; } }
+</style></head>
+<body>
+<div class="shell">
+  <aside>
+    <nav aria-label="Past chats">
+      <a href="#/c/1">Three days in the old town with a day trip to the coast</a>
+      <a href="#/c/2">Packing list for a week of hiking in early spring</a>
+      <a href="#/c/3">Train or bus between the two cities, which is cheaper</a>
+      <a href="#/c/4">Where to eat near the market on a Sunday evening</a>
+    </nav>
+  </aside>
+  <main>
+    <h1>Trip ideas</h1>
+    <div class="chips"><button>Shorter</button><button>Longer</button><button>Add a budget</button><button>Add a map</button><button>Make it a table</button><button>Translate</button></div>
+    <article class="reply">
+      <p>Three days is enough for the old town, the market and one day trip to the coast.</p>
+      <button><span class="sr-only">Copy the whole answer to the clipboard</span>Copy</button>
+      <div class="reply-footer">This answer cost 0.4 cents · 1,204 words read · 3.2 seconds · standard model</div>
+    </article>
+    <article class="reply">
+      <p>Take the early train. It is cheaper before eight.</p>
+      <pre>depart 07:40  arrive 09:05  platform 4  second class  one way  flexible ticket  seat 42</pre>
+      <div class="reply-footer">This answer cost 0.2 cents · 310 words read · 1.1 seconds · standard model</div>
+    </article>
+  </main>
+</div>
+</body>
+</html>

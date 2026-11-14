@@ -20,13 +20,14 @@ Copy this into your working notes and tick each line as you finish it. Do not st
 
 ```
 Audit progress:
-- [ ] 0. Started: one line to the owner, tools ready, door checked
+- [ ] 0. Started: one line to the owner, tools ready, owner's rules read, door checked, signed in with the profile
 - [ ] 1. Every screen reached, signed in and signed out
 - [ ] 1b. Every safe control opened
+- [ ] 1c. Existing results opened (read-only)
 - [ ] 2. Core tasks named
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
-- [ ] 4b. Category leaders compared, information architecture checked
+- [ ] 4b. Category leaders researched live and compared (how they work, where things live)
 - [ ] 5. Pass 3: visual craft checked
 - [ ] 5b. Pass 4: taste checked, First impression filled
 - [ ] 6. Keeps named
@@ -39,7 +40,7 @@ Audit progress:
 ## Rules that never bend
 
 - **Read-only code.** Do not edit app files, add packages to the app's project, deploy or push. Write only inside `<audit>/`. If any tool you use saves files elsewhere (for example a browser tool's own folder such as `.playwright-mcp`), move them into `<audit>/` before you finish and list them in Left behind. Prefer the scripts here over other browser tools.
-- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus, reading pages and typing in search boxes are fine. Do not type into composers, editors or forms: many autosave. Keep a list of everything you create or change.
+- **Guest in a live app.** On a live app you are using the owner's real account. Never click anything that publishes, posts, sends, deletes, archives, pays, invites, connects an account, saves settings, flips a switch, or generates content (it can spend the owner's credits and adds records), unless the owner said yes to that exact action. Opening menus, reading pages and typing in search boxes are fine. Do not type into composers, editors or forms: many autosave. Keep a list of everything you create or change.
 - **Evidence for every pain.** A pain needs a screen and a screenshot that exists on disk. No evidence, no pain.
 - **Only claim what you finished.** Never say you checked something you did not. If a width, a state or a flow was not seen, it goes in Not verified, never in the findings.
 - **No invented facts.** No made-up user quotes, complaints, metrics or analytics.
@@ -55,11 +56,19 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
 2. **Version.** Execute `node <skill>/scripts/version.mjs`. Never stop for it. If it says a newer version is out, end the reply with the update note (below).
 3. **Tools.** Execute `node <skill>/scripts/setup.mjs`. It installs Playwright in a ShipRight tools folder in the user's home, never in the app, and does nothing if Playwright is already there. Do not ask first. If it fails, audit by hand and say what that cost.
 4. **Check the door.** Run the crawl (Step 1). Then:
-   - **Login wall:** execute `node <skill>/scripts/login.mjs <url> --out <audit>/.session.json` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in."  Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. Then crawl again with `--session`. If the window closes without a session, say so and offer to open it again. The window keeps its own browser profile, so the next audit of the same site usually opens already signed in. In Left behind, name both the session file and the profile folder (`~/.shipright/profiles/<site>`).
+   - **Login wall:** execute `node <skill>/scripts/login.mjs <url> --out <audit>/.session.json` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in."  Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. If the window closes without a sign-in, say so and offer to open it again.
+   - **Stay signed in: profile first.** `login.mjs` prints the profile folder it used (`~/.shipright/profiles/<site>`) and the browser. From now on pass `--profile <that folder> --session <audit>/.session.json` to every script. The profile is tried first: many apps swap their sign-in token on every refresh, so the session file goes stale within seconds, while the sign-in window's own profile always holds the newest token. The session file is only the fallback. Run the scripts one at a time, never two on the same profile at once.
+   - **Signed out is never silent.** Each script first checks that the app still knows us. If not, it tries the other way once, then stops with "The app signed us out (401). Run login.mjs again." Do that and run the script again. Never go on signed out, and never switch to by-hand without telling the owner why. If a site refuses headless browsers, the script retries once in a window placed off screen and says which mode ran.
+   - In Left behind, name both the session file and the profile folder.
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
-5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported.
-6. **The core promise.** If the app's main promise can only be checked by doing the thing (send a message, run an automation, place a test booking), ask once, after the crawl: "May I do <1 or 2 named actions> to check <the promise>? They will show in your account, and I'll list them." Default is no. On yes, mark those steps `"owner_said_yes": true` and list them in Left behind.
+5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported. Never open a file that may list them (see 7) before the gate passes.
+6. **Use it like a real user: one question.** Looking is not enough: most of what owners complain about is what happens when you use a feature. Ask once, after the crawl, in these words: "Can I use the app like a real user? I would flip the switches in menus and turn them back, send up to 3 short test messages, and make 1 test item. Estimated cost: under $1. Everything I create will be listed so you can delete it. (Default: no.)" Do not wait long: if there is no answer, the answer is no, and you go on.
+   - **On yes:** run Step 1b with `--use`, and mark the test-message steps in Step 3 `"owner_said_yes": true`. Stay inside what was asked: at most 3 short test messages (say they are tests, for example "ShipRight test: please ignore") and 1 test item. The header says `Used as a user: yes (N actions)`, and Left behind lists every test message, every test item and every switch flipped.
+   - **On no (or no answer):** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
+   - **Never, even on yes:** publish, send email or messages to other people, delete, pay, invite, connect an account, or change account settings. Each of those needs its own exact yes.
+7. **Read the owner's own rules first.** Without asking, execute `node <skill>/scripts/owner-rules.mjs <project folder> --out <audit>/owner-rules.md`. It looks in the folder for design rules and history (`DESIGN.md`, `design-system*`, `*taste*`, style guides, `CHANGELOG*`, `docs/**/*.md` and the README) and quotes each rule and each decision with its file and line. Then read those files yourself and add any rule it missed to `owner-rules.md`, quoted word for word. Also say one line that does not wait for an answer: "If you have design rules or a changelog, drop the file here any time." If the owner does, run it again with `--add <file>`.
+   - **Benchmark fairness.** Design rules and changelogs are allowed. A list of the owner's current complaints is never read before the gate passes, even if it sits in the folder (`*complaints*`, `*notes*`, `*issues*`, `*feedback*` and the like). The script skips such files without opening them. Do not open them either, and name each one as skipped in the header's "Context used" line.
 
 If the owner gives instructions at any point (what to skip, what is allowed), follow them and say which reading you took.
 
@@ -67,26 +76,41 @@ If the owner gives instructions at any point (what to skip, what is allowed), fo
 
 ## Step 1: Reach every screen
 
-`node <skill>/scripts/crawl.mjs <index.html or url> [--session <audit>/.session.json] --out <audit>/screens`
+`node <skill>/scripts/crawl.mjs <index.html or url> [--profile <profile folder> --session <audit>/.session.json] --out <audit>/screens`
+
+`[sign-in]` in the commands below means those same two flags: `--profile <profile folder> --session <audit>/.session.json`. Use them on every script when the app has a login.
 
 - It saves every reachable screen at 390 and 1280 wide, with its H1, actions, form fields and console errors.
 - Every script waits for each page to settle (no spinners, numbers stop changing) before reading it. `crawl.md` marks a screen that never settled as **may be mid-load**: do not cite its counts or empty messages as real.
 - If Playwright's own browser will not start, every script falls back to the installed Microsoft Edge, then Google Chrome, then Playwright's WebKit. To force one, set `SHIPRIGHT_BROWSER=msedge` (or `chrome`, `webkit`).
 - `crawl.md` flags a **login wall**, **mostly empty** screens, and **label drift** (links that go to the same place under different words).
-- **Signed out too.** When you have a session, also crawl once without it, so the sign-in, sign-up and reset pages get audited. Owners judge those first.
-- **By hand when the scripts cannot reach the site** (for example an app only the owner's own browser is signed in to): use a browser tool, visit each screen at 1280 and 390 and save each screenshot into `<audit>/screens/`. Paste `<skill>/scripts/analyze-page.js` into the tool's JavaScript runner followed by `JSON.stringify(SHIPRIGHT_ANALYZE())` on each main page: it runs the same checks as `visual.mjs`. Do Step 1b by hand with the same rules. Say in the header that the audit ran by hand.
+- **Signed out too.** When the app has a login, also crawl once without the sign-in flags (into `<audit>/screens-signed-out`), so the sign-in, sign-up and reset pages get audited. Owners judge those first.
+- **By hand when the scripts cannot reach the site** (for example an app only the owner's own browser is signed in to): use a browser tool, visit each screen at 1280 and 390 and save each screenshot into `<audit>/screens/`. Paste `<skill>/scripts/analyze-page.js` into the tool's JavaScript runner followed by `JSON.stringify(SHIPRIGHT_ANALYZE())` on each main page, at 1280 and again at 390: it runs the same checks as `visual.mjs` (clipped text, media that never loaded and layout shift included). On a page that holds a result, use `SHIPRIGHT_ANALYZE({ results: true })`. Do Steps 1b and 1c by hand with the same rules. Say in the header that the audit ran by hand, and why.
 - If no browser can be used at all, visit what you can, record the width you actually saw, and put any width you did not see in Not verified.
 
-Done when you can list every screen in scope.
+Done when you can list every screen in scope, each with its 1280 and its 390 screenshot. Count them for the header: "Phone coverage: X of Y in-scope screens". A screen with no 390 screenshot goes in Not verified by name.
 
 ## Step 1b: Open every safe control
 
-Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --crawl <audit>/screens/crawl.json [--session ...] --out <audit>/explore`.
+Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/explore`.
 
+- It runs at 1280 and at 390 wide (`--widths 1280,390` is the default). At 390 it explores the controls that only exist on phone and opens again whatever opened a dialog, menu or panel, so each one is seen on phone too. Text cut off inside what opened is a lead.
 - It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
 - Read `explore.md`. Open the **not clicked** controls yourself when the name makes the effect clear and it cannot save, send or spend: a dialog that asks before it saves is safe to open and close. Look inside everything that opened: the confusing part is often the panel, not the button.
 - Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
-- Put the totals in the header: "Controls opened: N of M".
+- **Switches are never flipped without the owner's yes.** After a yes to the Step 0 question, run it again with `--use`: it flips each switch in the menus it opens and on the page, waits for the page to settle, records what changed on screen (new chips, new panels, text near the message box, the URL) with before and after screenshots, then turns it back and checks it is back. A switch that adds something visible away from itself is a `toggle-side-effect` lead. It skips switches on settings and account screens and ones with risky or account-wide names: those need their own yes. If a switch could not be turned back, tell the owner at once and list it in Left behind.
+- Put the totals in the header: "Controls opened: N of M". `explore.md` prints the line to copy.
+
+## Step 1c: Open existing results (read-only)
+
+The owner's own data is the best test data. A generated image that never shows, a reply footer cut off on phone, a row of unnamed icons under an answer: these only appear on a page that holds a real result, and an audit that only looks at empty screens never sees them. Execute `node <skill>/scripts/samples.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/samples`.
+
+- It finds item lists (past chats, library, projects, files: links in a navigation, side panel, list or table that share a pattern), opens up to 5 items per list (`--samples N`), and prefers items whose page holds images, files, code, artifacts, or tool and connector results.
+- On each item, at 1280 and 390, it scrolls through, saves a full-page screenshot and runs the page checks plus the result checks: **media that never loaded** (a broken image, a dead video, a "click to load image" placeholder where the media should be), **clipped text**, and **action buttons with no name**.
+- It is read-only: it opens each item by its address and scrolls. It never clicks or types. Do the same by hand: never click inside a result, except to open it.
+- Read `samples.md` and look at every `R-*.png` page screenshot yourself: does the result look right, at both widths? Scripts cannot judge that.
+- Its leads are **R##**. Decide each one in **Script leads**, like V## and E##.
+- If it finds no item lists (items opened by buttons, not links), open 3 to 5 past items by hand at both widths and say so in the header. If the account has no past items, write that in Not verified.
 
 ## Step 2: Name the core tasks
 
@@ -97,9 +121,10 @@ From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. W
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note where it broke.
 
 1. Write a plan file, `<audit>/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step.
-2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [--session ...] --out <audit>/walks/<task>`.
+2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [sign-in] --out <audit>/walks/<task>`.
 3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
 4. Use those step screenshots as evidence for pains inside the flow.
+5. **Test messages (only after the owner's yes).** A step with `"owner_said_yes": true` runs once, at 1280, so the app gets one test message, not two. After an owner-approved click or key press the walker waits for the result to settle, then checks it at 1280 and at 390: media that loaded, text that is not cut off, action buttons with names. Each problem is a lead (`W-...`) in `walk.md`: decide it in Script leads. Open the `*-result.png` screenshots too and judge the result yourself.
 
 Ask the big question first: does the product support the user's real job? A polished screen in the wrong flow is still a Blocker.
 
@@ -111,23 +136,27 @@ Read `references/heuristics.md` and check every screen in scope against the 10 u
 
 **Independent reviewers.** If your tool can start subagents, run 2 or 3 reviewers with the same brief, screens and references, and never let one see another's notes. Merge their lists and record how many found each pain. If you cannot, write "Reviewers: 1" in the header.
 
-## Step 4b: Compare with the category leaders, and check where things live
+## Step 4b: Compare with the category leaders: how they work, and where things live
 
 Owners judge their app against the apps their users already know, and users expect it to work the same way. Read `references/conventions.md`.
 
-1. Name the category and 3 to 5 leaders. Search the web or open their sites when you can, and cite what you saw. Otherwise mark claims "from knowledge, not checked today".
-2. Fill the pain map's **Category conventions** table, at least 6 rows: what the leaders do, what this app does, and a verdict (Matches, a pain ID, or "Differs on purpose:" with the reason).
-3. Run the "where does it belong" checks (IA1 to IA6) on the navigation, the panels and Settings. Pains use the lens "Conventions: C1" or "IA: IA#".
-4. Features every leader has and this app lacks go in Missing.
+1. Name the category and 3 to 5 leaders.
+2. **Research them live. This is required when you have a web search or web fetch tool.** For each leader, open its help pages or product pages and read how the feature works today. Cite the URL and the date you checked in the **Source** column. "From knowledge, not checked today" is allowed only when no web tool exists, and then the header says "Competitor research: from knowledge, no web tool". Otherwise the header says "Competitor research: live, checked <date>".
+3. **Compare behavior, not only placement.** For every main feature the app has, research how 2 or more leaders handle it, with the 5 questions in C3: is it set once per account or per chat or item, how is it called up (a menu, "/", "@", a button, by itself), how does a result show and what happens before anything is sent or changed (a draft, then confirm), how do users create their own (with AI, import, a template), and what does it look like on phone.
+4. Fill the pain map's **Category conventions** table, at least 10 rows: Area, Kind ("Where it sits" or "How it works", at least 3 of these), what the leaders do, what this app does, Source, and a verdict (Matches, a pain ID, or "Differs on purpose:" with the reason). With a web tool, at least half the rows have a linked Source.
+5. Run the "where does it belong" checks (IA1 to IA6) on the navigation, the panels and Settings. Pains use the lens "Conventions: C1", "Conventions: C3" or "IA: IA#".
+6. Features the leaders have and this app lacks go in Missing, under **What leaders have that this app doesn't**, with the leaders named and linked.
 
 ## Step 5: Pass 3, visual craft
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
-1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [--session ...] --out <audit>/visual`. It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, and counts with nothing behind them. It opens menus but never clicks risky words. The same problem on several pages is one lead.
-2. Open `visual.md`, `explore.md` and each crop. **Decide every lead** (V## and E##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
-3. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
-4. Cite the crop or the full screenshot as evidence.
+1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
+2. **Design-system drift.** Execute `node <skill>/scripts/consistency.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/consistency`. On every screen, signed in, it measures search inputs, text inputs, dropdowns, primary buttons, cards, list rows and side panels, and compares corner radius, background, border, height and font size across screens. When most screens share one look and one screen differs, that is a **component drift** lead (C##) with a crop of the usual look and of the odd one out. Its inventory table is a signal for the taste pass.
+3. **Motion.** `visual.mjs` reports a page that **jumps after it has loaded** (layout shift over 0.1: a banner that arrives late, an image with no size). `explore.mjs` reports a menu or dialog that makes the page behind it jump when it opens, and, with the browser set to **reduce motion**, anything that still slides, zooms or spins without need.
+4. Open `visual.md`, `explore.md`, `samples.md`, `consistency.md` and each crop. **Decide every lead** (V##, E##, R## and C##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
+5. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
+6. Cite the crop or the full screenshot as evidence.
 
 ## Step 5b: Pass 4, taste
 
@@ -162,6 +191,20 @@ Read `references/finding-examples.md` before you write. Each pain has:
 
 Visual craft pains are usually Minor or Polish, but they rise to Major when they hide the main action, mislead (a false count), or appear on every screen.
 
+**The owner's own rules and decisions** (when `<audit>/owner-rules.md` exists). Read it before you write a single pain.
+
+- A pain that breaks one of the owner's own rules gets the lens `Owner rule: "<quote>"`, quoted word for word. That is the strongest evidence there is: the owner already agreed it matters.
+- Something that differs from the leaders or from good practice but matches an owner decision is **not a pain**. It goes in **Owner decisions respected**, with the quote. A blunt greeting the owner chose is a voice, not "scolding".
+- When you are unsure whether something is on purpose (a brand or vendor name, a tone, a style), it goes in **Decisions for the owner** as a question, not in the pains.
+
+**Names rule.** Before you flag a brand, vendor or library name in the UI, classify it:
+
+- **A license or credit line.** Fine on legal and notices pages. Flag it only where it shows as the product's own name (a tab title, the logo, the sign-in heading).
+- **A user-facing feature** (a tool, a style or a mode the user can turn on). Fine: it is the owner's feature, not a leftover.
+- **A leftover** (a starter-kit name, a template title, a test label). A pain.
+
+If you cannot tell which it is, ask in Decisions for the owner.
+
 **One problem per row.** If you need "and", a semicolon or a second sentence to add a different problem, that problem gets its own row. The same problem on several screens is one row that lists every screen. Do not pad the list with Polish to look thorough.
 
 ## Step 8: Find what is missing
@@ -186,21 +229,27 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 2. Fix every failed box, then check again. Repeat up to 3 times. If a box still fails, stop and report which one and why.
 
 - [ ] Scope, out of scope and reviewer count are stated.
+- [ ] The header says how many controls were opened.
+- [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.
+- [ ] The header says "Used as a user: yes (N actions)" or "no". On yes, Left behind lists every action. On no, Not verified says "How features behave when used (switches, sending, results)".
+- [ ] The header says "Competitor research: live, checked <date>", or "from knowledge, no web tool" when no web tool exists.
 - [ ] Every screen in scope appears in Screens.
 - [ ] At least 3 task walks, each with a step count.
 - [ ] At least 3 Keeps.
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
-- [ ] Every script lead (visual and explore) is decided in Script leads: a pain ID, or Rejected with a reason.
-- [ ] Category conventions has at least 6 rows, each with a verdict.
-- [ ] The header says how many controls were opened.
+- [ ] Every script lead (visual V##, explore E##, existing results R##, design-system drift C##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
+- [ ] Category conventions has at least 10 rows, each with a Kind, a Source and a verdict. At least 3 rows are "How it works". With a web tool, at least half the rows have a linked Source with the date checked.
 - [ ] First impression has a score and a reason for T1 to T9, and a verdict.
+- [ ] When `owner-rules.md` exists: the pain map has Owner decisions respected (rows, or "None" and why), every owner quote stands word for word in `owner-rules.md`, and files skipped for fairness are named in "Context used".
 - [ ] No pain rests on a screenshot the crawl saved mid-load, unless loading is the pain.
 - [ ] No duplicate pains, and one problem per row.
-- [ ] Missing has rows, or says "None found" with what was checked.
+- [ ] Missing has rows, or says "None found" with what was checked. It also has the part "What leaders have that this app doesn't", with the leaders named and linked, or "None found".
 - [ ] Every Now pain has a chosen fix, its principle and a test.
 - [ ] No pain is marked Reported unless the owner or a user said it.
-- [ ] Not verified lists everything you could not check, including any width you did not see.
-- [ ] Left behind lists everything you created or changed, or says "Nothing".
+- [ ] Not verified lists everything you could not check, including any screen or width you did not see, any feature you could not use, and anything a script could not reach.
+- [ ] Left behind lists everything you created or changed (test messages, test items, switches flipped, the session file, the sign-in profile folder), or says "Nothing".
+
+**The header.** Under the title, the pain map states: the date, screens in scope, tasks walked, `Controls opened: N of M`, reviewers, method, widths seen and data, then `Phone coverage: X of Y in-scope screens`, `Used as a user: yes (N actions)` or `no`, and `Competitor research: live, checked <date>` or `from knowledge, no web tool`, then Scope, Out of scope and Context used (owner rules read, files skipped for fairness).
 
 ## Output
 
@@ -215,17 +264,20 @@ Keep it short. In this order:
 3. **Keeps:** the top 3, one line each.
 4. **Top pains:** up to 5 Blockers and Majors, each with its screenshot.
 5. **Themes:** 3 to 5, with the pain IDs in each.
-6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide".
+6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide". Things that may be on purpose (a name, a tone, a style) are asked here, never listed as pains.
 7. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
-8. **Not verified:** what you could not check.
-9. **Left behind:** everything you created or changed in the app (test items, drafts, notifications) and in the folder (packages, the session file). Offer to remove what you can. Always remind the owner to delete `.session.json`.
+8. **Not verified:** what you could not check: screens or widths not seen, features not used (when the owner said no: "How features behave when used (switches, sending, results)"), hardware features, and anything a script could not reach.
+9. **Left behind:** everything you created or changed in the app (every test message and test item, every switch flipped and whether it is back, drafts, notifications) and in the folder (packages, the session file, the sign-in profile folder in `~/.shipright/profiles`). Offer to remove what you can. Always remind the owner to delete `.session.json` and the profile folder: both hold their sign-in.
 10. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
 11. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
 
 ## Never
 
 - Edit, install into, deploy or push the app.
-- Click anything the safety rule forbids without the owner's yes.
+- Click anything the safety rule forbids, or flip a switch, without the owner's yes.
+- Go on signed out after a script said "The app signed us out".
+- Open a file that may list the owner's current complaints before the gate passes.
+- List an owner decision, or a feature's own name, as a pain.
 - Ask for, or type, a password or sign-in code in chat.
 - Open with a list of questions when you could start.
 - Fix while auditing. Fixes happen after the owner picks.

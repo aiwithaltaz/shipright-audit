@@ -52,6 +52,39 @@ Breaks: H3 Let users undo and exit; H9 Help users fix errors
 Severity: 2 Minor
 Cause: missing feature · Source: Found
 
+## Pain 5: where it sits vs how it works
+
+**Weak:** "Reminders are in the wrong place."
+
+**Strong:**
+P16 · Reminders are switched on again for every booking. In the leaders it is set once for the account and stays on.
+Where: New booking, step 3 · `walks/book/1280-05.png`
+Who: staff who book many visits a day
+Breaks: Conventions: C3 (set once or every time); H7 Make frequent tasks fast
+Severity: 3 Major (one extra step on every booking)
+Cause: flow · Source: Found
+Leaders: two booking tools, help pages opened today (the URLs and the date are in the Category conventions table).
+
+## Pain 6: the owner's own rule
+
+**Strong:**
+P18 · The cards on Home sit 28px apart. The owner's design rules say 16px.
+Where: Home · `screens/s01-desktop.png`
+Who: everyone
+Breaks: Owner rule: "Cards always sit 16px apart, on every screen." (DESIGN.md:5)
+Severity: 1 Polish
+Cause: layout · Source: Found
+
+## Not a pain: the owner chose it
+
+**Wrong:** "P19 · The greeting 'Back again? Fine.' scolds the user." (The owner wrote: "The greeting is blunt on purpose.")
+
+**Right:** one row in **Owner decisions respected**: Greets with "Back again? Fine." · "The greeting is blunt on purpose. Keep it." · DESIGN.md:10 · Leaders greet warmly.
+
+**Wrong:** "P20 · A style called 'Blueprint' shows in the tools menu: a leftover name." (It is a style the user can turn on: a feature.)
+
+**Right:** classify the name first. A credit line on a legal page: fine. A feature the user can turn on: fine. A starter-kit title in the browser tab: a pain. Not sure: ask in Decisions for the owner.
+
 ## Keeps: generic vs useful
 
 **Weak:** "The design is clean."
