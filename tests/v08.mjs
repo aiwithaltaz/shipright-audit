@@ -224,6 +224,32 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
       bare.leads.map(l => l.what.slice(0, 70)).join(' | ') || 'no lead');
     ok('marker-no-filter: the same list with a "Favorites" tab gives none', tabbed.leads.length === 0 && tabbed.hits.length === 0, tabbed.leads.map(l => l.what.slice(0, 70)).join(' | ') || 'no lead');
   }
+
+  // Step 7. Map each item's life before judging its buttons. Post cards in 5 states (Editing, Rendering,
+  // Ready, Posted, Failed) all offer the same two buttons. visual.mjs lists the states, and the gate then
+  // needs an Item lifecycles row for every one. (The two "Done when" gate cases are also in the self-test.)
+  if (want('lifecycle') && hasPw) {
+    const audit = tmp('lifecycle');
+    runSync([S + 'visual.mjs', 'tests/fixtures/lifecycle-app/index.html', '--no-click', '--out', join(audit, 'visual')]);
+    const vj = readJson(join(audit, 'visual', 'visual.json'), { item_states: [] });
+    const posts = (vj.item_states || []).find(x => x.item === 'Posts') || { states: [] };
+    const md = existsSync(join(audit, 'visual', 'visual.md')) ? readFileSync(join(audit, 'visual', 'visual.md'), 'utf8') : '';
+    ok('visual.mjs lists the states an item type was seen in', posts.states.join() === 'Editing,Failed,Posted,Ready,Rendering' && /## Item states seen/.test(md) && /needs Item lifecycles/.test(md), `${posts.states.join(', ') || 'none found'}`);
+    const { check, samplePainMap } = await import('../skills/shipright-audit/scripts/check-stage.mjs');
+    mkdirSync(join(audit, 'screens'));
+    for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(audit, f), '');
+    const ledger = (vj.leads || []).length ? `\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n${vj.leads.map(l => `| ${l.id} | ${l.kind} | Rejected: not part of this test |`).join('\n')}\n` : '';
+    const map = samplePainMap() + ledger;
+    const rows = [['Editing', 'P01: Q3'], ['Rendering', 'P01: Q3'], ['Ready', 'Pass'], ['Posted', 'P01: Q1'], ['Failed', 'P01: Q4']];
+    const table = `\n## Item lifecycles\n| ID | Item | State | Actions shown | Verdict |\n|---|---|---|---|---|\n${rows.map(([st, v], i) => `| LC0${i + 1} | Post | ${st} | Publish, Schedule | ${v} |`).join('\n')}\n`;
+    const none = check(map, audit), full = check(map + table, audit), short = check(map + table.replace(/\| LC05 .*\n/, ''), audit);
+    ok('gate: an item in 3 or more states needs an Item lifecycles row for every state',
+      none.some(e => e.includes('Missing section "## Item lifecycles"')) && full.length === 0 && short.some(e => e.includes('Add a row for: Failed')), full.join(' | ') || `${none.length} problem(s) without the table, 0 with it`);
+    const keep = map.replace('| K2 | Steps | Clear | Book |', '| K2 | Card buttons fit each state | Each card offers the right actions | Posts |');
+    ok('gate: a Keep about card actions must cite a lifecycle row that passed',
+      check(keep + table, audit).some(e => e.includes('Keeps K2: this Keep is about the actions on an item')) && check(keep.replace('| Each card offers the right actions |', '| The Ready card offers the right actions (LC03) |') + table, audit).length === 0
+      && check(keep.replace('| Each card offers the right actions |', '| Each card offers the right actions (LC01) |') + table, audit).some(e => e.includes('LC01 did not pass all 4 lifecycle questions')), 'no row cited fails, a passed row passes, a failed row fails');
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -28,6 +28,8 @@
 //                        control in two navigations
 //   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
 // A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
+// It also returns "item_states": the status labels seen on repeated items ("Editing", "Rendering", "Ready").
+// Not a lead: an item type with 3 or more states needs an Item lifecycles table in the pain map (Step 2b).
 // Reduced motion: switch the browser to "reduce motion" (in DevTools: Rendering, Emulate CSS media
 // feature prefers-reduced-motion), reload, open a menu and run it at once. Anything still moving is a lead.
 var SHIPRIGHT_ANALYZE = (opts = {}) => {
@@ -637,6 +639,41 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
     }
   }
 
+  // ---- Item states: the life of the things this app makes -------------------------------------------
+  // Not a lead. Lists the status labels seen on repeated items (cards, rows): "Editing", "Rendering",
+  // "Ready", "Posted". An item type with 3 or more states needs its life mapped before its buttons are
+  // judged (Step 2b, Item lifecycles). One status label per item: an item with several is tagged, not staged.
+  const itemStates = [];
+  {
+    const STATUS = /^(draft|drafts|editing|edited|in progress|in review|review|needs review|reviewing|rendering|rendered|processing|generating|generated|queued|pending|waiting|ready|done|complete|completed|finished|scheduled|published|posted|live|sent|sending|delivered|shipped|shipping|packing|paid|unpaid|overdue|failed|error|cancell?ed|archived|approved|rejected|declined|open|closed|resolved|confirmed|unconfirmed|booked|active|inactive|paused|expired|new|on hold|blocked|backlog|to ?do|doing|in transit|returned|refunded|submitted|accepted|uploading|uploaded|exporting|exported|syncing|synced|building|deployed|stopped|running|succeeded|upcoming|filled|unfilled|assigned|unassigned|checked in|no show)\b/i;
+    const labels = new Set([...pills, ...document.querySelectorAll('[class*=status i], [class*=badge i], [class*=state i], [class*=chip i], [class*=tag i], [class*=pill i], td')]);
+    const byList = new Map();
+    for (const el of labels) {
+      const t = text(el).replace(/^[^\p{L}]+/u, '');
+      if (!t || t.length > 24 || t.split(' ').length > 3 || !STATUS.test(t) || !shown(el) || !inScope(el) || el.closest('nav, header, footer, [role=tablist], [role=menu], select, button, a')) continue;
+      // The item this label sits on: the nearest ancestor with 2 or more same-tag siblings.
+      let item = null;
+      for (let x = el.parentElement; x && x !== document.body; x = x.parentElement) {
+        if (x.parentElement && [...x.parentElement.children].filter(k => k.tagName === x.tagName && vis(k)).length >= 3) { item = x; break; }
+      }
+      if (!item) continue;
+      const list = byList.get(item.parentElement) || { parent: item.parentElement, perItem: new Map() };
+      byList.set(item.parentElement, list);
+      const have = list.perItem.get(item) || new Set();
+      have.add(t.replace(/\s+\d+%?$/, '').toLowerCase());
+      list.perItem.set(item, have);
+    }
+    for (const list of byList.values()) {
+      const states = new Set();
+      for (const set of list.perItem.values()) if (set.size === 1) states.add([...set][0]);
+      if (states.size < 2) continue;
+      // What these items are: the nearest heading above the list, else the page title.
+      let head = null;
+      for (let x = list.parent; x && !head; x = x.parentElement) { let p = x.previousElementSibling; while (p && !head) { head = p.matches('h1, h2, h3, h4') ? p : p.querySelector('h1, h2, h3, h4'); p = p.previousElementSibling; } }
+      itemStates.push({ item: (head ? text(head) : document.title || 'Items').slice(0, 60), states: [...states].map(st => st.charAt(0).toUpperCase() + st.slice(1)).sort(), items: list.perItem.size, mark: tag(list.parent) });
+    }
+  }
+
   // Layout shift: content that jumps after it was first shown (a banner that arrives late, an image
   // with no size, a font swap). The browser reports each jump; over 0.1 in total is easy to notice.
   const shift = { total: 0, count: 0 };
@@ -723,5 +760,5 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const main = document.querySelector('main') || document.body;
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
   const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
-  return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, title: document.title, width: document.documentElement.clientWidth };
+  return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, item_states: itemStates, title: document.title, width: document.documentElement.clientWidth };
 };

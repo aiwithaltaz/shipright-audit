@@ -132,7 +132,7 @@ try {
         }
       }
       // The style inventory and the count check read each page once, at the first width.
-      if (width === widths[0]) pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, style: a.style, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
+      if (width === widths[0]) pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, style: a.style, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, item_states: (a.item_states || []).map(({ mark, ...x }) => x), menus: menus.map(({ box, ...m }) => m) });
       else { const p = pages.find(x => x.url === url); if (p && !settled) p.settled = false; }
     }
   }
@@ -167,7 +167,15 @@ for (const l of leads.filter(x => x.kind === 'layout-shift')) {
   l.detail = { ...all[0].detail, per_page: all.map(f => ({ page: local(f.page), width: f.width, total: f.detail.total })) };
   l.shot = all[0].shot || l.shot;
 }
-writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
+// The states each kind of item was seen in, across every page: "Projects: Editing, Rendering, Ready".
+const stateMap = new Map();
+for (const p of pages) for (const it of p.item_states || []) {
+  const have = stateMap.get(it.item.toLowerCase()) || { item: it.item, states: new Set(), pages: new Set() };
+  it.states.forEach(st => have.states.add(st)); have.pages.add(local(p.url));
+  stateMap.set(it.item.toLowerCase(), have);
+}
+const itemStates = [...stateMap.values()].map(x => ({ item: x.item, states: [...x.states].sort(), pages: [...x.pages] }));
+writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, item_states: itemStates, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
 const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one' };
 const md = ['# Visual checks', '', `${pages.length} page(s) at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
@@ -180,6 +188,7 @@ md.push('', '## Style inventory (for the taste pass)', '', 'Signals, not verdict
 for (const p of pages) { const st = p.style || {}; md.push(`| ${local(p.url)} | ${(st.font_families || []).join(', ').replace(/\|/g, '/') || 'none'} (${(st.font_families || []).length}) | ${(st.font_sizes || []).length}: ${(st.font_sizes || []).join(' ')} | ${st.accent_colors ?? 0} | ${st.line_length_chars ? `${st.line_length_chars.median} / ${st.line_length_chars.max}` : 'no long text'} | ${st.all_caps_long || 0} | ${st.emoji_icons || 0} |`); }
 md.push('', `## Corner scale (px: how many cards, buttons and fields use it, at ${widths[0]} wide)`, '');
 for (const p of pages) md.push(`- ${local(p.url)}: ${Object.entries(p.corner_scale).map(([r, c]) => `${r}px x${c}`).join(', ') || 'none measured'}`);
+if (itemStates.length) md.push('', '## Item states seen (for Step 2b, Item lifecycles)', '', 'Status labels on repeated items. Add the states this missed (open one item in each state when you can). An item type with 3 or more states needs a row per state in the pain map\'s **Item lifecycles** table, and the gate checks it.', '', '| Items | States seen | Pages |', '| --- | --- | --- |', ...itemStates.map(x => `| ${x.item.replace(/\|/g, '/')} | ${x.states.join(', ')}${x.states.length >= 3 ? ' (needs Item lifecycles)' : ''} | ${x.pages.join(', ')} |`));
 const allCounts = pages.flatMap(p => p.counts.map(c => `${c.label} ${c.count}`));
 if (allCounts.length) md.push('', '## Numbers on navigation', '', ...[...new Set(allCounts)].map(c => `- ${c}`), '', 'Check what each number counts. A number on a tab reads as "this many need you".');
 const emptyPages = pages.filter(p => p.empty).length;

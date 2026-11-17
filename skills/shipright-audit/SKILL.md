@@ -26,6 +26,7 @@ Audit progress:
 - [ ] 1b. Every safe control opened
 - [ ] 1c. Existing results opened (read-only)
 - [ ] 2. Core tasks named
+- [ ] 2b. Item lifecycles mapped: every state of each main item type, and the actions in each
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
 - [ ] 4b. Category leaders researched live and compared (how they work, where things live)
@@ -130,6 +131,24 @@ The owner's own data is the best test data. A generated image that never shows, 
 
 From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. Write each as a user goal ("Register a family of 4"), not a feature ("Use the form"). Note the business goal each task serves.
 
+## Step 2b: Item lifecycles
+
+An audit that judges a card's buttons without knowing where the item is in its life gets it wrong. "The buttons fit each state" may be true for a finished item and false for one still being edited. Map the life first, then judge.
+
+1. Name each main item type the app makes or manages: a project, an order, a booking, a draft.
+2. List every state you can see for it, from status badges and labels on cards, rows and detail pages (for example: Editing, Rendering, Ready, Scheduled, Posted, Failed). To get the states the script can see, execute `node <skill>/scripts/visual.mjs <index.html or url> --audit <audit>` now and read **Item states seen** in `<audit>/visual/visual.md`. Step 5 reads the same output: do not run it twice. Add the states it missed, and open one item in each state when you can (Step 1c).
+3. For each state, write down the actions the item offers: the buttons on its card or row, and what its menu holds.
+4. Check each state against the 4 questions (`references/heuristics.md`, L10):
+   1. Is there exactly one clear next step?
+   2. Does leaving an unfinished item offer a way back in ("Continue editing")?
+   3. Are final actions (Publish, Pay, Send) only offered once the item is ready?
+   4. Does a failed state say why and how to fix it?
+5. Fill the pain map's **Item lifecycles** table: one row per item and state, with an ID (LC01, LC02), the actions shown and a verdict. The verdict is `Pass` (all 4 questions), the pain ID with the question it fails (`P07: Q3`), or `Not verified:` and why. A state you could not see also goes in Not verified.
+
+- A state that fails a question is a pain with the lens "L10: Q#". Its cause is usually flow.
+- The gate requires the table when any item type shows 3 or more states, with a row for every state the script saw.
+- **A Keep about item actions** ("the card buttons fit each state") must point to the lifecycle rows that passed all 4 questions ("LC02, LC03"). No lifecycle row, no Keep.
+
 ## Step 3: Pass 1, walk each task
 
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note where it broke.
@@ -165,7 +184,7 @@ Owners judge their app against the apps their users already know, and users expe
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
-1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --audit <audit>`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It also runs 5 checks that owners spot at once (V9 to V13 in `references/visual-craft.md`): **template text** left in view (`[topic]`, `{name}`, "undefined", "lorem ipsum"), **faint icons** (under 3:1 against their background), a chip or button **overflowing its box**, **duplicates on one screen** (the same text block twice, or the same control in two navigations), and **stacked control rows** (2 rows of search, sort, filters or tabs above one list that could be one row). It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
+1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --audit <audit>` (if you ran it in Step 2b, read that output). It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It also runs 5 checks that owners spot at once (V9 to V13 in `references/visual-craft.md`): **template text** left in view (`[topic]`, `{name}`, "undefined", "lorem ipsum"), **faint icons** (under 3:1 against their background), a chip or button **overflowing its box**, **duplicates on one screen** (the same text block twice, or the same control in two navigations), and **stacked control rows** (2 rows of search, sort, filters or tabs above one list that could be one row). It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
 2. **Design-system drift.** Execute `node <skill>/scripts/consistency.mjs <index.html or url> --audit <audit>`. On every screen, signed in, it measures search inputs, text inputs, dropdowns, primary buttons, cards, list rows and side panels, and compares corner radius, background, border, height and font size across screens. When most screens share one look and one screen differs, that is a **component drift** lead (C##) with a crop of the usual look and of the odd one out. Its inventory table is a signal for the taste pass.
 3. **Motion.** `visual.mjs` reports a page that **jumps after it has loaded** (layout shift over 0.1: a banner that arrives late, an image with no size). `explore.mjs` reports a menu or dialog that makes the page behind it jump when it opens, and, with the browser set to **reduce motion**, anything that still slides, zooms or spins without need.
 4. Open `visual.md`, `explore.md`, `samples.md`, `consistency.md` and each crop. **Decide every lead** (V##, E##, R## and C##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
@@ -182,6 +201,8 @@ Fill the **First impression** section of the pain map: a score of 1 to 5 for T1 
 
 List at least 3 things that work and why: clear patterns, good copy, useful data, fast paths. Keeps are locked unless the owner says otherwise. A review with no Keeps is not trusted.
 
+A Keep about the actions on an item (card buttons, row actions, the next step) needs proof from Step 2b: name the Item lifecycles rows that passed all 4 questions. If a state fails, it is a pain, not a Keep.
+
 ## Step 7: Write each pain
 
 Read `references/finding-examples.md` before you write. Each pain has:
@@ -189,7 +210,7 @@ Read `references/finding-examples.md` before you write. Each pain has:
 - **What happens**, in one sentence.
 - **Where:** every screen it appears on, plus a screenshot path that exists.
 - **Who** it hurts.
-- **Heuristic or lens** it breaks (from `references/heuristics.md` or `references/visual-craft.md`).
+- **Heuristic or lens** it breaks (from `references/heuristics.md` or `references/visual-craft.md`). A lifecycle state that fails one of the 4 questions uses "L10: Q#".
 - **Severity** (below).
 - **Cause:** layout, flow, copy, missing feature, data model, rules or prerequisites, performance, trust, or access.
 - **Source:** Found or Reported. Add "found by 2 of 3 reviewers" when you ran more than one.
@@ -249,7 +270,8 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] The header says "Competitor research: live, checked <date>", or "from knowledge, no web tool" when no web tool exists.
 - [ ] Every screen in scope appears in Screens.
 - [ ] At least 3 task walks, each with a step count.
-- [ ] At least 3 Keeps.
+- [ ] At least 3 Keeps. A Keep about the actions on an item points to Item lifecycles rows that passed all 4 questions.
+- [ ] When any item type shows 3 or more states: Item lifecycles has a row for every state (ID, item, state, actions shown, verdict).
 - [ ] Every pain has a screen, a screenshot that exists, a heuristic or lens, a severity, one cause and a source.
 - [ ] Every script lead (visual V##, explore E##, existing results R##, design-system drift C##, walk results W-...) is decided in Script leads: a pain ID, or Rejected with a reason.
 - [ ] Category conventions has at least 10 rows, each with a Kind, a Source and a verdict. At least 3 rows are "How it works". With a web tool, at least half the rows have a linked Source with the date checked.
@@ -302,4 +324,5 @@ Keep it short. In this order:
 - Invent quotes, complaints, numbers or user research.
 - Claim a check, a width or a state you did not see.
 - Write a review with no Keeps.
+- Praise or fault an item's buttons before its states are mapped (Step 2b).
 - Pad the list to look thorough.

@@ -34,7 +34,16 @@ Every screen needs its 1280 and its 390 screenshot. A screen you could not see a
 | Task | Business goal | Steps | Screens | Dead ends | Where it broke |
 |---|---|---|---|---|---|
 
+## Item lifecycles
+
+Fill this when any item type (a project, an order, a booking, a draft) shows 3 or more states. One row per item and state. Verdict: `Pass` (all 4 questions), the pain ID with the question it fails (`P07: Q3`), or `Not verified:` and why. The 4 questions: Q1 exactly one clear next step, Q2 a way back into unfinished work, Q3 final actions only once the item is ready, Q4 a failed state says why and how to fix it. Write "None: no item type shows 3 or more states" if there are none.
+
+| ID | Item | State | Actions shown | Verdict |
+|---|---|---|---|---|
+
 ## Keeps
+
+A Keep about the actions on an item points to the Item lifecycles rows that passed (for example "LC02, LC03").
 
 | ID | Keep | Why it works | Where |
 |---|---|---|---|

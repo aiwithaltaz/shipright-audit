@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Posts</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 960px; margin: 0 auto; padding: 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.card { border: 1px solid #c9c9c9; border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.card h3 { font-size: 17px; margin: 0; }
+.status { align-self: flex-start; font-size: 12px; line-height: 20px; border-radius: 999px; padding: 2px 10px; background: #e3ebfa; color: #1c3a7a; }
+.acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.acts button { padding: 8px 12px; border: 1px solid #777; border-radius: 8px; background: #fff; font: inherit; }
+</style></head>
+<body>
+<main>
+  <h1>Posts</h1>
+  <div class="grid">
+    <article class="card"><h3>Autumn menu</h3><span class="status">Editing</span><div class="acts"><button type="button">Publish</button><button type="button">Schedule</button></div></article>
+    <article class="card"><h3>Opening hours</h3><span class="status">Rendering</span><div class="acts"><button type="button">Publish</button><button type="button">Schedule</button></div></article>
+    <article class="card"><h3>Weekend special</h3><span class="status">Ready</span><div class="acts"><button type="button">Publish</button><button type="button">Schedule</button></div></article>
+    <article class="card"><h3>New chef</h3><span class="status">Posted</span><div class="acts"><button type="button">Publish</button><button type="button">Schedule</button></div></article>
+    <article class="card"><h3>Holiday closing</h3><span class="status">Failed</span><div class="acts"><button type="button">Publish</button><button type="button">Schedule</button></div></article>
+  </div>
+</main>
+</body>
+</html>

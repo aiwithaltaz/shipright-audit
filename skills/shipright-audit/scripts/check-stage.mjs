@@ -3,6 +3,9 @@
 // Usage: node <skill>/scripts/check-stage.mjs <pain-map.md>
 // When the audit folder holds owner-rules.md, the pain map needs "## Owner decisions respected", and every
 // owner quote in it (and in an "Owner rule:" lens) must stand word for word in owner-rules.md.
+// "## Item lifecycles" (one row per item and state: ID, Item, State, Actions shown, Verdict) is needed when
+// visual/visual.json saw an item type in 3 or more states ("item_states"), with a row for every state seen.
+// A Keep about the actions on an item must point to lifecycle rows (LC01, LC02) that passed all 4 questions.
 // When the audit folder holds visual/visual.json, explore/explore.json, samples/samples.json,
 // consistency/consistency.json or a walk.json with result leads, every lead must be listed in "## Script leads"
 // as a pain or as Rejected with a reason. When screens/crawl.json marks a screen as still loading,
@@ -142,6 +145,41 @@ export function check(md, dir = null) {
 
   for (const pid of convIds) if (!ids.has(pid)) errors.push(`Category conventions: ${pid} is not in Pains.`);
 
+  // Item lifecycles (Step 2b): each item type's states, the actions offered in each, and a verdict
+  // against the 4 questions: one clear next step, a way back into unfinished work, final actions only
+  // when ready, and a failed state that says why and how to fix it.
+  const life = sections['Item lifecycles'] ? table(sections['Item lifecycles']) : null;
+  const lifeRows = new Map();
+  if (life) {
+    if (!life.rows.length && !/\bnone\b/i.test(sections['Item lifecycles'].join('\n'))) errors.push('Item lifecycles: add one row per item and state, or write "None: no item type shows 3 or more states".');
+    life.rows.forEach((r, i) => {
+      const id = r[0] || '';
+      if (!/^LC\d{2,}$/.test(id)) { errors.push(`Item lifecycles row ${i + 1}: the ID must look like LC01.`); return; }
+      if (lifeRows.has(id)) errors.push(`Item lifecycles ${id}: duplicate ID.`);
+      const verdict = (cell(life, r, 'verdict') || r[r.length - 1] || '').trim();
+      const pid = verdict.match(/\bP\d{2,}\b/);
+      const pass = /^pass\b/i.test(verdict) && !pid;
+      if (!cell(life, r, 'item') || !cell(life, r, 'state')) errors.push(`Item lifecycles ${id}: name the item and the state.`);
+      if (!cell(life, r, 'actions')) errors.push(`Item lifecycles ${id}: Actions shown is empty. List the buttons the item offers in this state, or write "none".`);
+      if (!pass && !pid && !/^not verified\W+\w+/i.test(verdict)) errors.push(`Item lifecycles ${id}: the verdict must be Pass (all 4 questions), the pain ID with the question it fails (P07: Q3), or "Not verified:" with the reason.`);
+      if (pid && !ids.has(pid[0])) errors.push(`Item lifecycles ${id}: ${pid[0]} is not in Pains.`);
+      lifeRows.set(id, { state: cell(life, r, 'state'), pass });
+    });
+  }
+  // A Keep about the actions on an item ("the card buttons fit each state") is only true once the
+  // item's life is mapped: it must point to lifecycle rows that passed all 4 questions.
+  const ABOUT_ACTIONS = /\b(actions?|buttons?|ctas?|next steps?)\b/i, ABOUT_ITEMS = /\b(cards?|items?|rows?|states?|status(es)?|stages?|lifecycles?|each)\b/i;
+  for (const r of keeps.rows) {
+    const said = `${cell(keeps, r, 'keep')} ${cell(keeps, r, 'why')}`;
+    if (!ABOUT_ACTIONS.test(said) || !ABOUT_ITEMS.test(said)) continue;
+    const cited = [...new Set((r.join(' ').match(/\bLC\d{2,}\b/g) || []))];
+    if (!cited.length) errors.push(`Keeps ${r[0]}: this Keep is about the actions on an item. Map the item's life first (Step 2b), then point to the Item lifecycles row(s) that passed all 4 questions, for example "LC02, LC03". No lifecycle row, no Keep.`);
+    for (const id of cited) {
+      if (!lifeRows.has(id)) errors.push(`Keeps ${r[0]}: ${id} is not a row in Item lifecycles.`);
+      else if (!lifeRows.get(id).pass) errors.push(`Keeps ${r[0]}: ${id} did not pass all 4 lifecycle questions, so it cannot back a Keep.`);
+    }
+  }
+
   // The page inventory is the part of Missing above its first "###" heading.
   const missingAll = sections['Missing'] || [], firstSub = missingAll.findIndex(l => /^###\s+/.test(l));
   const missingMain = firstSub < 0 ? missingAll : missingAll.slice(0, firstSub);
@@ -259,6 +297,15 @@ export function check(md, dir = null) {
           if (!pain && !(/^rejected\b/i.test(decision) && decision.replace(/^rejected\W*/i, '').split(/\s+/).length >= 3)) errors.push(`Script leads ${id}: decision must be a pain ID, or "Rejected:" with a reason of 3 words or more.`);
         }
       }
+    }
+    // Item lifecycles: an item type the scripts saw in 3 or more states needs a row for every state.
+    let staged = [];
+    try { const vj = find(dir, 'visual.json'); if (vj) staged = (JSON.parse(readFileSync(vj, 'utf8')).item_states || []).filter(x => (x.states || []).length >= 3); } catch {}
+    for (const it of staged) {
+      if (!life || !life.rows.length) { errors.push(`${life ? 'Item lifecycles has no rows' : 'Missing section "## Item lifecycles"'}. The scripts saw "${it.item}" in ${it.states.length} states (${it.states.join(', ')}). Map its life before you judge its buttons (Step 2b): one row per state, with the actions shown and a verdict.`); break; }
+      const have = life.rows.map(r => cell(life, r, 'state').toLowerCase());
+      const missing = it.states.filter(st => !have.some(h => h.includes(st.toLowerCase())));
+      if (missing.length) errors.push(`Item lifecycles: the scripts saw "${it.item}" in ${it.states.length} states (${it.states.join(', ')}). Add a row for: ${missing.join(', ')}.`);
     }
     // The owner's own rules. When owner-rules.md exists: decisions the app follows on purpose are listed
     // (they are not pains), and every quote is real.
@@ -468,6 +515,25 @@ function selfTest() {
     ['used: a plain yes fails when use-limits.json holds actions back', check(listed, d5).some(e => e.includes('holds back 1 action(s)'))],
     ['used: yes with limits must quote the words in use-limits.json', check(limited.replace('leave the image tools off', 'do whatever you like'), d5).some(e => e.includes('exactly as they stand in use-limits.json'))],
   );
+  // Item lifecycles: an item seen in 3 or more states needs the table, with a row per state. A Keep about
+  // the actions on an item must point to a lifecycle row that passed all 4 questions.
+  const d6 = mkdtempSync(join(tmpdir(), 'gate-life-'));
+  for (const sub of ['screens', 'visual']) mkdirSync(join(d6, sub));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d6, f), '');
+  writeFileSync(join(d6, 'visual/visual.json'), JSON.stringify({ leads: [], item_states: [{ item: 'Projects', states: ['Editing', 'Ready', 'Rendering'], pages: ['/projects'] }] }));
+  const lifeTable = '\n## Item lifecycles\n| ID | Item | State | Actions shown | Verdict |\n|---|---|---|---|---|\n| LC01 | Project | Editing | Continue editing, Delete | Pass |\n| LC02 | Project | Rendering | Cancel render | Pass |\n| LC03 | Project | Ready | Publish, Schedule, Edit | P01: Q1 |\n';
+  const cardKeep = good.replace('| K2 | Steps | Clear | Book |', '| K2 | Card buttons fit each state | One clear action per card | Projects |');
+  cov.push(
+    ['lifecycle: an item in 3 or more states with no Item lifecycles table fails', check(good, d6).some(e => e.includes('Missing section "## Item lifecycles"') && e.includes('Editing, Ready, Rendering'))],
+    ['lifecycle: a row for every state passes', check(good + lifeTable, d6).length === 0],
+    ['lifecycle: a state with no row fails', check(good + lifeTable.replace(/\| LC02 .*\n/, ''), d6).some(e => e.includes('Add a row for: Rendering'))],
+    ['lifecycle: a vague verdict fails', check(good + lifeTable.replace('| Cancel render | Pass |', '| Cancel render | Looks fine |'), d6).some(e => e.includes('LC02: the verdict must be Pass'))],
+    ['lifecycle: a Keep about card actions that cites no lifecycle row fails', check(cardKeep + lifeTable, d6).some(e => e.includes('Keeps K2: this Keep is about the actions on an item'))],
+    ['lifecycle: a Keep that cites rows that passed all 4 questions passes', check(cardKeep.replace('| One clear action per card |', '| One clear action per card (LC01, LC02) |') + lifeTable, d6).length === 0],
+    ['lifecycle: a Keep that cites a row that failed a question fails', check(cardKeep.replace('| One clear action per card |', '| One clear action per card (LC03) |') + lifeTable, d6).some(e => e.includes('LC03 did not pass all 4 lifecycle questions'))],
+    ['lifecycle: a Keep that cites a row that does not exist fails', check(cardKeep.replace('| One clear action per card |', '| One clear action per card (LC09) |') + lifeTable, d6).some(e => e.includes('LC09 is not a row in Item lifecycles'))],
+    ['lifecycle: no staged items and no item Keep, no table needed', check(good, d).filter(e => /lifecycle/i.test(e)).length === 0],
+  );
   // Competitor research: fewer than 10 rows, no Source column and no how-it-works rows each fail. A table
   // that has them passes (the good pain map above). Without a web tool, "from knowledge" must say so.
   const conv = good.split('## Category conventions')[1].split('## Screens')[0];
@@ -502,7 +568,7 @@ function selfTest() {
     ['owner rules: no owner-rules.md, no section needed', check(good, d).filter(e => /owner/i.test(e)).length === 0],
   );
   const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
-  console.log(covFailed.length === 0 ? `PASS  header, research, owner-rule and use-limit checks: ${cov.length} cases` : `FAIL  header, research, owner-rule and use-limit checks: ${covFailed.join(', ')}`);
+  console.log(covFailed.length === 0 ? `PASS  header, research, owner-rule, use-limit and lifecycle checks: ${cov.length} cases` : `FAIL  header, research, owner-rule, use-limit and lifecycle checks: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
   const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'Competitor research:', 'verdict must be Matches', 'Compare at least 10', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));
