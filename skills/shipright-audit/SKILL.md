@@ -16,17 +16,17 @@ In this skill, a problem is always called a **pain**. A thing that works is alwa
 
 ## Progress checklist
 
-Copy this into your working notes and tick each line as you finish it. Do not start a step before the one above it is ticked.
+Copy this into your working notes and tick each line as you finish it. Do not start a step before the one above it is ticked (one exception: 4b may run while you wait at 2c).
 
 ```
 Audit progress:
 - [ ] 0. Started: one line and the use-it question to the owner, tools ready, owner's rules read, door checked, signed in with the profile
-- [ ] 0b. The use-it answer is in (yes, no, or yes with limits), or the session is unattended
 - [ ] 1. Every screen reached, signed in and signed out
 - [ ] 1b. Every safe control opened
 - [ ] 1c. Existing results opened (read-only)
 - [ ] 2. Core tasks named
 - [ ] 2b. Item lifecycles mapped: every state of each main item type, and the actions in each
+- [ ] 2c. The use-it answer is in (yes, no, or yes with limits), or the session is unattended. No answer yet: do 4b while you wait, then stop and wait
 - [ ] 3. Pass 1: tasks walked
 - [ ] 4. Pass 2: screens checked against the lenses
 - [ ] 4b. Category leaders researched live and compared (how they work, where things live)
@@ -71,11 +71,11 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported. Never open a file that may list them (see 7) before the gate passes.
 6. **Use it like a real user: wait for the answer.** Looking is not enough: most of what owners complain about is what happens when you use a feature. The question went out in your first message (1).
-   - **Work while you wait.** The crawl (Step 1), opening controls without `--use` (Step 1b), existing results (Step 1c), naming the tasks (Step 2) and the leader research (Step 4b) do not need the answer. Do them.
+   - **Work while you wait.** The crawl (Step 1), opening controls without `--use` (Step 1b), existing results (Step 1c), naming the tasks (Step 2), the item lifecycles (Step 2b) and the leader research (Step 4b) do not need the answer. Do them.
    - **Then stop and wait.** Before the first step that needs the answer (Step 1b with `--use`, a test message in Step 3), check for it. If the owner has not answered, stop: ask again as the last thing on screen, "Before I go on: may I use the app like a real user? Reply yes, no, or yes with limits.", and end your turn. If your tool has a way to ask the owner a question, use it. **Never treat silence as no in a live session**, and never ask and go on in the same message.
    - **Unattended only.** When nobody can answer (a scheduled or headless run, with no person in the session), go on read-only. The header says `Used as a user: not answered (unattended)`, and Not verified gets the line below.
    - **On yes:** run Step 1b with `--use`, and mark the test-message steps in Step 3 `"owner_said_yes": true`. Stay inside what was asked: at most 3 short test messages (say they are tests, for example "ShipRight test: please ignore") and 1 test item. The header says `Used as a user: yes (N actions)`, and Left behind lists every test message, every test item and every switch flipped.
-   - **On yes with limits:** write `<audit>/use-limits.json` before you use anything. Keep the owner's own words: `{ "answer": "yes with limits", "owner_words": "<what the owner wrote>", "allowed": ["<each thing they allowed>"], "held": [{ "action": "<each thing they ruled out>", "match": ["<the words on the buttons or switches that would do it>"] }] }`. `explore.mjs --use` and `walk.mjs` read it and hold every switch or owner-approved step that matches a held action. Hold the same things when you work by hand. The header says `Used as a user: yes with limits: "<owner's words>" (N actions)`, and Not verified names each thing that was held.
+   - **On yes with limits:** write `<audit>/use-limits.json` before you use anything. Keep the owner's own words: `{ "answer": "yes with limits", "owner_words": "<what the owner wrote>", "allowed": ["<each thing they allowed>"], "held": [{ "action": "<each thing they ruled out>", "match": ["<the words on the buttons or switches that would do it>"] }], "allow_controls": ["<a Create, Add or New button the owner said you may press>"] }`. `explore.mjs --use` and `walk.mjs` read it and hold every switch or owner-approved step that matches a held action. Hold the same things when you work by hand. The header says `Used as a user: yes with limits: "<owner's words>" (N actions)`, and Not verified names each thing that was held.
    - **On no:** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
    - **Never, even on yes:** publish, send email or messages to other people, delete, pay, invite, connect an account, or change account settings. Each of those needs its own exact yes.
 7. **Read the owner's own rules first.** Without asking, execute `node <skill>/scripts/owner-rules.mjs <project folder> --app <url> --out <audit>/owner-rules.md`. It looks in the folder for design rules and history (`DESIGN.md`, `design-system*`, `*taste*`, style guides, `CHANGELOG*`, `docs/**/*.md` and the README) and quotes each rule and each decision with its file and line. Then read those files yourself and add any rule it missed to `owner-rules.md`, quoted word for word. Also say one line that does not wait for an answer: "If you have design rules or a changelog, drop the file here any time." If the owner does, run it again with `--add <file>`: a file the owner hands over is always read.
@@ -283,7 +283,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Missing has rows, or says "None found" with what was checked. It also has the part "What leaders have that this app doesn't", with the leaders named and linked, or "None found".
 - [ ] Every Now pain has a chosen fix, its principle and a test.
 - [ ] No pain is marked Reported unless the owner or a user said it.
-- [ ] Not verified lists everything you could not check, including any screen or width you did not see, any feature you could not use, and anything a script could not reach.
+- [ ] Not verified lists everything you could not check, including any screen or width you did not see, any feature you could not use, anything the owner's limits held, any item state you could not see, and anything a script could not reach.
 - [ ] Left behind lists everything you created or changed (test messages, test items, switches flipped, the session file, `signin.json`, the sign-in profile folder), or says "Nothing".
 
 **The header.** Under the title, the pain map states: the date, screens in scope, tasks walked, `Controls opened: N of M`, reviewers, method, widths seen and data, then `Phone coverage: X of Y in-scope screens`, `Used as a user:` with one of `yes (N actions)`, `yes with limits: "<owner's words>" (N actions)`, `no` or `not answered (unattended)`, and `Competitor research: live, checked <date>` or `from knowledge, no web tool`, then Scope, Out of scope and Context used (owner rules read, files skipped for fairness).

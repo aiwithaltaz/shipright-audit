@@ -166,10 +166,10 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     const other = tmp('rules-other');
     writeFileSync(join(other, 'DESIGN.md'), '# Design\n\n- Buttons always use 8px corners.\n');
     const otherOut = join(tmp('rules-other-out'), 'owner-rules.md');
-    const un = or(other, '--app', 'https://app.plantpal.example/dashboard', '--out', otherOut);
+    const un = or(other, '--app', 'https://app.plant-notes.example/dashboard', '--out', otherOut);
     const unrelated = un.status === 0 && !existsSync(otherOut) && /No rules for this app in this folder/.test(un.stdout);
-    writeFileSync(join(other, 'README.md'), '# PlantPal\n\nA watering planner.\n');
-    const rel = or(other, '--app', 'https://app.plantpal.example/dashboard', '--out', otherOut);
+    writeFileSync(join(other, 'README.md'), '# Plant Notes\n\nA watering planner.\n');
+    const rel = or(other, '--app', 'https://app.plant-notes.example/dashboard', '--out', otherOut);
     ok('owner-rules reads nothing from a folder that never mentions the app, and reads it once it does',
       unrelated && rel.status === 0 && existsSync(otherOut) && /Buttons always use 8px corners/.test(readFileSync(otherOut, 'utf8')), `${un.stdout.trim().slice(0, 50)} / ${rel.stdout.trim().slice(0, 40)}`);
   }

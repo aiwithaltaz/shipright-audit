@@ -101,8 +101,9 @@ while (Date.now() - started < timeoutMs) {
   if (closed) break;
   const inNow = await looksSignedIn().catch(() => false);
   streak = inNow ? streak + 1 : 0;
-  // Where the app took the owner after sign-in: the first page of the run that ends signed in.
-  if (inNow && streak === 1) landedAt = page.url();
+  // Where the app took the owner after sign-in. The newest signed-in page wins, so a short stop on
+  // the way (a callback page that forwards to the dashboard) is not kept.
+  if (inNow) landedAt = page.url();
   // Read the cookies only once the page looks signed in. Reading storage opens a hidden tab for every site
   // the window has visited (Google's sign-in included); doing that every few seconds kept reloading and
   // broke "Sign in with Google" pop-ups.

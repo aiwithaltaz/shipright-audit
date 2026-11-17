@@ -8,8 +8,8 @@ const shell = (title, body) => `<!doctype html>
 </html>`;
 const appNav = '<nav aria-label="App"><a href="/app">Home</a><a href="/app/projects">Projects</a><a href="/app/settings">Settings</a></nav>';
 const PAGES = {
-  '/': shell('Weekplan', '<nav><a href="/pricing">Pricing</a><a href="/login">Sign in</a></nav><h1>Plan your week in ten minutes</h1><p>A calm planner for small teams.</p>'),
-  '/pricing': shell('Pricing', '<nav><a href="/">Weekplan</a><a href="/login">Sign in</a></nav><h1>Pricing</h1><p>Free for teams of three. 8 dollars a seat after that.</p>'),
+  '/': shell('Team planner', '<nav><a href="/pricing">Pricing</a><a href="/login">Sign in</a></nav><h1>Plan your week in ten minutes</h1><p>A calm planner for small teams.</p>'),
+  '/pricing': shell('Pricing', '<nav><a href="/">Team planner</a><a href="/login">Sign in</a></nav><h1>Pricing</h1><p>Free for teams of three. 8 dollars a seat after that.</p>'),
   '/login': shell('Sign in', `<h1>Sign in</h1><form><label>Email <input type="email"></label><label>Password <input type="password"></label><button type="button">Continue</button></form>
 <script>if (location.search.includes('auto')) setTimeout(() => { document.cookie = 'sr_in=1; path=/; max-age=3600'; location.href = '/app'; }, 1000);</script>`),
   '/app': shell('Home', appNav + '<h1>This week</h1><p>3 projects, 12 tasks due.</p>'),
