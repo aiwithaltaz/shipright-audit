@@ -207,6 +207,23 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     }
     ok('the 5 new checks add 0 false alarms to the existing fixtures and benchmark apps', loud.length === 0 && real === 1, loud.join(' | ') || `${sweep.length} apps, 1 real lead (lorem ipsum on a benchmark's Reports page, in its answer key)`);
   }
+
+  // Step 6. A marker you can set should be filterable. A list with star buttons and no "Starred" filter
+  // gives 1 lead. The same list with a "Favorites" tab gives none. Nothing is clicked to find out.
+  if (want('marker') && hasPw) {
+    const explore = async page => {
+      const app = await serveFixture(`tests/fixtures/marker-app/${page}`);
+      const o = tmp('marker');
+      await runNode([S + 'explore.mjs', app.url, '--out', o]);
+      app.stop();
+      return { o, hits: app.hits, leads: readJson(join(o, 'explore.json'), { leads: [{ kind: 'did not run' }] }).leads.filter(l => l.kind === 'marker-no-filter' || l.kind === 'did not run') };
+    };
+    const bare = await explore('index.html'), tabbed = await explore('with-filter.html');
+    ok('marker-no-filter: star buttons with no "Starred" filter give 1 lead, and no star is clicked',
+      bare.leads.length === 1 && /^You can star items but not see only starred items\./.test(bare.leads[0].what) && bare.leads[0].detail.items === 4 && !!bare.leads[0].shot && existsSync(join(bare.o, bare.leads[0].shot)) && bare.hits.length === 0,
+      bare.leads.map(l => l.what.slice(0, 70)).join(' | ') || 'no lead');
+    ok('marker-no-filter: the same list with a "Favorites" tab gives none', tabbed.leads.length === 0 && tabbed.hits.length === 0, tabbed.leads.map(l => l.what.slice(0, 70)).join(' | ') || 'no lead');
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

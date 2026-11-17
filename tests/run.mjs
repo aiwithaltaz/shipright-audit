@@ -315,7 +315,7 @@ if (hasPw) {
   ok('reduced motion: a menu that still slides in is a lead', motionLead.length === 1 && /After opening "Menu"/.test(motionLead[0].what) && /transform/.test(motionLead[0].what), motionLead.map(l => l.what.slice(0, 90)).join(' | ') || 'no lead');
   // No false alarms from the new checks on the fixtures that were not built for them, or on a busy app.
   const loud = [];
-  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded'];
+  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded', 'marker-no-filter'];
   for (const f of ['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app']) {
     const o1 = mkdtempSync(join(tmpdir(), 'fa-v-')), o2 = mkdtempSync(join(tmpdir(), 'fa-e-')), o3 = mkdtempSync(join(tmpdir(), 'fa-k-'));
     run([S7 + 'visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o1]);

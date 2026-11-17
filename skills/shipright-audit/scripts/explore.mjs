@@ -16,6 +16,12 @@
 //     (layout shift over 0.1), that is a lead.
 //   - Reduced motion: once per page it switches the browser to "reduce motion", loads the page again
 //     and opens one menu. Anything that still slides, zooms or spins without need is a lead.
+// It also checks, without clicking anything:
+//   - Markers with no filter: when the items of a list carry a marker control (star, favorite, like,
+//     pin, bookmark, save, flag), the same screen should offer a way to see only the marked items: a
+//     filter, tab, chip, link or sort option using the same word ("Starred", "Favorites", "Pinned",
+//     "Saved", "Flagged"). The menus this script opens count too. If there is none, that is a
+//     "marker-no-filter" lead: "You can star items but not see only starred items."
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -69,6 +75,55 @@ const ACCOUNT_PLACE = /settings|preferences|account|billing|profile|admin|securi
 const ACCOUNT_NAME = /notif|e-?mail|sms|billing|subscri|renew|two-factor|2fa|privacy|public|private|visib|sync|train|improve|telemetry|analytics|marketing|newsletter|cookie|backup|memory|remember|consent|terms|agree/i;
 // Switches that change one of the user's items (a task ticked off, a bookmark), not how the screen works. Never flipped.
 const ITEM_ACTION = /bookmark|mute|block|watch|up-?vote|down-?vote|react|complete|\bdone\b|resolve|\bhide\b|snooze|\bread\b|unread|\block\b|select (all|row|item)/i;
+
+// Markers on list items, and whether the screen offers a way to see only the marked ones. No clicking.
+const MARKERS = () => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  // A marker and the words a filter for it would use. Star, favorite and like are one family: an app
+  // that stars items and has a "Favorites" tab is fine.
+  const FAMILIES = [
+    { id: 'star', mark: /\b(un)?star(red|s)?\b|\b(un)?favou?rite[sd]?\b|\bfaves?\b|\bheart\b|\b(un)?like[sd]?\b/i, filter: /\bstarred\b|\bstars\b|\bfavou?rite[sd]?\b|\bfaves?\b|\bliked?\b|\blikes\b|\bloved\b/i,
+      words: n => /favou?rite|fave/i.test(n) ? ['favorite', 'favorite'] : /like/i.test(n) ? ['like', 'liked'] : /heart/i.test(n) && !/star/i.test(n) ? ['favorite', 'favorite'] : ['star', 'starred'] },
+    { id: 'pin', mark: /\b(un)?pin(ned|s)?\b/i, filter: /\bpinned\b|\bpins\b/i, words: () => ['pin', 'pinned'] },
+    { id: 'bookmark', mark: /\b(un)?bookmark(ed|s)?\b|\bsave for later\b|\b(read|watch) later\b|^(un)?saved?$/i, filter: /\bbookmark(ed|s)?\b|\bsaved\b|\breading list\b|\b(read|watch) later\b/i, words: n => /bookmark/i.test(n) ? ['bookmark', 'bookmarked'] : ['save', 'saved'] },
+    { id: 'flag', mark: /\b(un)?flag(ged|s)?\b/i, filter: /\bflagged\b|\bflags\b/i, words: () => ['flag', 'flagged'] },
+  ];
+  // What a control says it is: its words, its label for screen readers, or the name of its icon.
+  const nameOf = el => {
+    const said = (el.getAttribute('aria-label') || el.getAttribute('title') || text(el) || '').trim();
+    if (said) return said.slice(0, 40);
+    const icon = el.querySelector('svg, i, use, [data-icon]');
+    const hint = [el.getAttribute('data-icon'), icon && icon.getAttribute('data-icon'), icon && (icon.getAttribute('class') || ''), icon && (icon.getAttribute('href') || icon.getAttribute('xlink:href') || ''), el.querySelector('use') && (el.querySelector('use').getAttribute('href') || '')].filter(Boolean).join(' ');
+    return hint.replace(/[#_.-]+/g, ' ').replace(/\b(icon|icons|lucide|fa|fas|far|bi|ri|mdi|feather|outline|solid|fill|line)\b/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  };
+  const controls = [...document.querySelectorAll('button, [role=button], [role=switch], [role=checkbox], input[type=checkbox]')].filter(el => vis(el) && !(el.type === 'submit' && el.closest('form')) && !el.closest('nav, header, footer, [role=menu], [role=dialog], dialog, [role=toolbar]'));
+  const out = [];
+  for (const fam of FAMILIES) {
+    const marked = controls.map(el => ({ el, name: nameOf(el) })).filter(c => c.name && fam.mark.test(c.name) && !/\b(all|changes|draft|settings|as|and|new|filter|show|only)\b/i.test(c.name));
+    if (marked.length < 2) continue;
+    // The item each marker sits on: the nearest ancestor with a same-tag sibling that also holds one.
+    const holds = el => marked.some(m => el.contains(m.el));
+    const items = new Set();
+    for (const m of marked) {
+      for (let x = m.el.parentElement; x && x !== document.body; x = x.parentElement) {
+        if (!x.parentElement) break;
+        if ([...x.parentElement.children].some(sib => sib !== x && sib.tagName === x.tagName && holds(sib))) { items.add(x); break; }
+      }
+    }
+    if (items.size < 2) continue;
+    const inItem = el => [...items].some(i => i.contains(el));
+    const offers = [...document.querySelectorAll('[role=tab], [role=option], option, [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=radio], a, button, [role=button], label, summary, h1, h2, h3, h4, h5, h6, [class*=chip i], [class*=filter i]')]
+      .filter(el => !inItem(el) && (el.tagName === 'OPTION' || vis(el)))
+      .map(el => (el.getAttribute('aria-label') || text(el) || '').slice(0, 60)).filter(Boolean);
+    const offer = offers.find(t => fam.filter.test(t)) || null;
+    const [verb, done] = fam.words(marked[0].name);
+    const first = [...items][0];
+    first.parentElement.dataset.srmark = fam.id;
+    out.push({ family: fam.id, verb, done, filter: fam.filter.source, items: items.size, control: marked[0].name, offer });
+  }
+  return out;
+};
 
 // What is open right now: dialogs, menus, pop-overs, the URL and how much text the page shows.
 const STATE = () => {
@@ -249,6 +304,10 @@ try {
         return out;
       }, [DANGER.source, OPENER.source, allow, remote, CONTROLS]);
 
+      // Markers on list items (star, pin, bookmark...), read before anything is opened. Whether a
+      // filter for them exists is decided after the menus on this page have been opened and read.
+      const markers = firstWidth ? await page.evaluate(MARKERS).catch(() => []) : [];
+      const layerTexts = [];
       let clicked = 0, motionOpener = null;
       for (const c of controls) {
         const key = `${c.name}|${c.iconOnly}`;
@@ -299,6 +358,7 @@ try {
         // Look inside what opened: is any of its text cut off at this width? And did the page behind a
         // menu or dialog jump when it opened? (An accordion or a tab is meant to move the page.)
         if (newOpen.length && !picker) {
+          layerTexts.push(await page.evaluate(sel => [...document.querySelectorAll(sel)].map(e => e.innerText || '').join('\n'), LAYERS).catch(() => ''));
           const overlay = newOpen.some(o => /^(dialog|alertdialog|menu|listbox):/.test(o));
           const inside = await page.evaluate(analyzeScript({ within: LAYERS, only: ['clipped-text', 'layout-shift'], shiftWithInput: true })).catch(() => ({ findings: [] }));
           for (const f of inside.findings) {
@@ -330,6 +390,13 @@ try {
           await settle(page, { timeout: 6000 });
           await markControls(); // data-sre marks are gone after a reload: mark again in the same order
         }
+      }
+      // A marker you can set should be filterable: a star with no "Starred" filter, tab, chip or sort option.
+      for (const m of markers) {
+        if (m.offer || layerTexts.some(t => new RegExp(m.filter, 'i').test(t))) continue;
+        const shot = `E${String(++shotN).padStart(3, '0')}-${routeId}-marker-${m.family}.png`;
+        const ok = await page.locator(`[data-srmark="${m.family}"]`).first().screenshot({ path: join(outDir, shot), timeout: 4000 }).then(() => true).catch(() => page.screenshot({ path: join(outDir, shot) }).then(() => true).catch(() => false));
+        lead('marker-no-filter', `You can ${m.verb} items but not see only ${m.done} items. ${m.items} items on this screen carry a "${m.control}" control, and no filter, tab, chip or sort option on it uses that word`, url, width, ok ? shot : null, { group: `marker|${m.family}`, detail: { marker: m.control, items: m.items, family: m.family } });
       }
       // With the owner's yes: the switches that sit on the page itself.
       if (USE && firstWidth) await flipToggles({ url, width, routeId, opener: null, reopen: null });
