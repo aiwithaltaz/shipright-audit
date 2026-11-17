@@ -133,6 +133,46 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     const lk = readJson(join(lo, 'samples.json'), { items: [{ via_button: 'x' }] });
     ok('samples still opens linked items by address', lk.items.length === 2 && lk.items.every(i => !i.via_button), `${lk.items.length} items`);
   }
+
+  // Step 4. ShipRight's own files are never read as the app owner's rules, and a folder that is not
+  // about the audited app gives no rules.
+  if (want('rules')) {
+    const or = (...a) => runSync([S + 'owner-rules.mjs', ...a]);
+    const selfOut = join(tmp('rules-self'), 'owner-rules.md');
+    const self = or('.', '--out', selfOut);
+    ok('owner-rules on the ShipRight repo itself extracts 0 rules', self.status === 0 && !existsSync(selfOut) && /No rules for this app in this folder/.test(self.stdout) && /ShipRight's own source/.test(self.stdout), self.stdout.trim().slice(0, 80));
+    const fixOut = join(tmp('rules-fix'), 'owner-rules.md');
+    const fix = or('tests/fixtures/owner-rules-app', '--out', fixOut);
+    const fixText = existsSync(fixOut) ? readFileSync(fixOut, 'utf8') : '';
+    ok('the owner-rules fixture still extracts its rules', fix.status === 0 && /"Cards always sit 16px apart, on every screen\." \| DESIGN\.md:5/.test(fixText) && /4 quote\(s\) from 2 file\(s\)/.test(fix.stdout), fix.stdout.trim().slice(0, 60));
+    // A work folder that holds the app's own design doc next to a copy of ShipRight: only the app's rules are quoted.
+    const work = tmp('rules-work');
+    const put = (rel, text) => { mkdirSync(dirname(join(work, rel)), { recursive: true }); writeFileSync(join(work, rel), text); };
+    put('DESIGN.md', '# Design\n\n- Buttons always use 8px corners.\n');
+    put('shipright-audit/package.json', JSON.stringify({ name: 'shipright-audit' }));
+    put('shipright-audit/DESIGN.md', '# Design\n\n- Cards must always sit 40px apart.\n');
+    put('shipright-audit/docs/guide.md', '- Never use more than one accent color.\n');
+    put('skills/shipright-audit/references/taste.md', '- Headings must always use one font.\n');
+    put('tests/fixtures/sample/DESIGN.md', '- Icons must always be 20px.\n');
+    put('tools/.claude-plugin/plugin.json', JSON.stringify({ name: 'shipright-audit' }));
+    put('tools/docs/style-guide.md', '- Menus must always have square corners.\n');
+    const workOut = join(tmp('rules-work-out'), 'owner-rules.md');
+    const wr = or(work, '--out', workOut);
+    const workText = existsSync(workOut) ? readFileSync(workOut, 'utf8') : '';
+    ok('owner-rules skips ShipRight\'s own files inside a work folder and keeps the app\'s rules',
+      wr.status === 0 && /Buttons always use 8px corners/.test(workText) && !/40px apart|one accent color|one font|20px|square corners/.test(workText) && /1 quote\(s\) from 1 file\(s\)/.test(wr.stdout)
+      && ['shipright-audit', 'skills/shipright-audit', 'tests/fixtures', 'tools'].every(d => workText.includes(`- ${d}: part of ShipRight Audit itself`)), wr.stdout.trim().slice(0, 100));
+    // A folder that is not about the audited app: nothing is quoted. Once a file names the app, its rules count.
+    const other = tmp('rules-other');
+    writeFileSync(join(other, 'DESIGN.md'), '# Design\n\n- Buttons always use 8px corners.\n');
+    const otherOut = join(tmp('rules-other-out'), 'owner-rules.md');
+    const un = or(other, '--app', 'https://app.plantpal.example/dashboard', '--out', otherOut);
+    const unrelated = un.status === 0 && !existsSync(otherOut) && /No rules for this app in this folder/.test(un.stdout);
+    writeFileSync(join(other, 'README.md'), '# PlantPal\n\nA watering planner.\n');
+    const rel = or(other, '--app', 'https://app.plantpal.example/dashboard', '--out', otherOut);
+    ok('owner-rules reads nothing from a folder that never mentions the app, and reads it once it does',
+      unrelated && rel.status === 0 && existsSync(otherOut) && /Buttons always use 8px corners/.test(readFileSync(otherOut, 'utf8')), `${un.stdout.trim().slice(0, 50)} / ${rel.stdout.trim().slice(0, 40)}`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
