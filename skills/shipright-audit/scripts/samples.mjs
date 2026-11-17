@@ -2,8 +2,11 @@
 // Open existing results, read-only: past chats, library items, projects and files the owner already has.
 // The owner's own data is the best test data. A generated image that never shows, a reply footer cut
 // off on phone, an action row of unnamed icons: these only appear on a page that holds a real result.
-// Usage: node <skill>/scripts/samples.mjs <index.html|url> [--crawl crawl.json] [--routes "#/,/library"]
-//        [--samples 5] [--widths 1280,390] [--profile dir] [--session session.json] [--out dir]
+// Usage: node <skill>/scripts/samples.mjs <index.html|url> --audit <audit> [--routes "#/,/library"]
+//        [--samples 5] [--widths 1280,390]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit: this audit's folder. The sign-in comes from <audit>/signin.json, the screens from
+// <audit>/screens/crawl.json, and the results go to <audit>/samples.
 // What it does, on the start page, --routes and every screen in --crawl:
 //   1. Finds item lists: links inside nav, aside, lists and tables that share a pattern
 //      ("/chat/abc" and "/chat/xyz" are both "/chat/*").
@@ -19,27 +22,28 @@
 // Writes samples.json, samples.md, R-<list>-<item>-<width>.png page screenshots and R##-*.png crops to
 // --out (the skill passes <audit>/samples). Leads are R##: decide each one in the pain map's Script leads.
 // Exit 0 ran, 2 usage or missing Playwright, 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, auditPaths, landedOn, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths', '--samples'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths', '--samples', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/samples.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--samples 5] [--widths 1280,390] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'samples'));
+if (!target) { console.error('usage: node <skill>/scripts/samples.mjs <index.html|url> --audit <audit folder> [--routes ...] [--samples 5] [--widths 1280,390] [--crawl crawl.json] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
+const paths = auditPaths(args, 'samples');
+const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
-const { session, profile } = signInFlags(args, 'samples');
+const { session, profile, landed } = signInFlags(args, 'samples');
 const N = Math.max(1, Number(flag('--samples') || 5));
 const widths = widthsFlag(args);
 const MAX_SHOT_PX = 6000, MAX_LISTS = 6;
 const RISKY_HREF = /delete|remove|destroy|log-?out|sign-?out|archive|unsubscribe|export|download|revoke|disconnect|share|publish|duplicate/i;
 
 const site = await openTarget(target, 'samples');
-const opened = await openContext({ session, profile, name: 'samples', url: site.startUrl, viewport: viewportFor(widths[0]) });
+const opened = await openContext({ session, profile, name: 'samples', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = opened.page;
-const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'samples' });
+const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'samples' });
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
 
 // Links that sit in a navigation, a side panel, a list or a table.

@@ -3,8 +3,11 @@
 // sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, text that is cut off, media that never loaded,
 // a page that jumps while it loads (layout shift over 0.1), and counts that promise items a page does not have.
 // Every finding gets a cropped screenshot when there is something to crop.
-// Usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes "#/,#/library"] [--crawl crawl.json]
-//        [--widths 1280,390] [--profile dir] [--session session.json] [--out dir] [--no-click]
+// Usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit> [--routes "#/,#/library"]
+//        [--widths 1280,390] [--no-click]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit    this audit's folder: the sign-in comes from <audit>/signin.json, the screens from
+//            <audit>/screens/crawl.json, and the results go to <audit>/visual
 // --routes   extra pages to check (hash routes, paths or URLs), in addition to the start page
 // --crawl    take every screen URL from a crawl.json written by crawl.mjs
 // --widths   screen widths to check. Both 1280 and 390 run by default: every page is checked on phone too
@@ -19,18 +22,19 @@
 // Writes visual.json, visual.md and V##-*.png crops to --out (the skill passes <audit>/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright,
 // 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, auditPaths, landedOn, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes ...] [--crawl crawl.json] [--widths 1280,390] [--profile dir] [--session file] [--out dir] [--no-click]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'visual'));
+if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit folder> [--routes ...] [--widths 1280,390] [--no-click] [--crawl crawl.json] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
+const paths = auditPaths(args, 'visual');
+const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
-const { session, profile } = signInFlags(args, 'visual');
+const { session, profile, landed } = signInFlags(args, 'visual');
 const noClick = args.includes('--no-click');
 const widths = widthsFlag(args);
 
@@ -81,9 +85,9 @@ async function openMenus(page, routeId, startFinding, suffix) {
 }
 
 const site = await openTarget(target, 'visual');
-const opened = await openContext({ session, profile, name: 'visual', url: site.startUrl, viewport: viewportFor(widths[0]) });
+const opened = await openContext({ session, profile, name: 'visual', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = opened.page;
-const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'visual' });
+const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'visual' });
 
 const pages = [];
 const findings = [];

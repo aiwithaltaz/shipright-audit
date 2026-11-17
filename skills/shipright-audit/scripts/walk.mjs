@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Walk one core task like a first-time user: click, type and pick by visible words, screenshot every step.
-// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]
+// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> --audit <audit> [--out dir]
+//        (older form, still works: [--profile dir] [--session session.json] --out dir)
+// --audit:   this audit's folder. The sign-in comes from <audit>/signin.json, the owner's limits from
+//            <audit>/use-limits.json, and the walk goes to <audit>/walks/<task>.
 // --profile: the sign-in window's browser profile (login.mjs prints its path). Tried first.
 // --session: a signed-in session file saved by login.mjs. The fallback.
 // With either, it stops with exit 3 if the app no longer knows us.
@@ -36,7 +39,7 @@
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl, analyzeScript, mergeLeads, useLimits, heldBy, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, analyzeScript, mergeLeads, useLimits, heldBy, auditFolder, landedOn, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -44,10 +47,10 @@ import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const pos = args.filter((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile', '--limits'].includes(args[i - 1]));
+const pos = args.filter((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile', '--limits', '--audit'].includes(args[i - 1]));
 const [target, planPath] = pos;
 if (!target || !planPath || !existsSync(planPath)) {
-  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]');
+  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> --audit <audit folder> [--out dir] [--profile dir] [--session session.json]');
   process.exit(2);
 }
 let plan;
@@ -57,10 +60,10 @@ const KNOWN = ['goto', 'click', 'fill', 'select', 'press', 'expect', 'note'];
 const unknown = plan.steps.map((s, i) => [i + 1, s.do]).filter(([, d]) => !KNOWN.includes(d));
 if (unknown.length) { console.error(`walk: unknown step type(s): ${unknown.map(([n, d]) => `step ${n} "${d}"`).join(', ')}. Use ${KNOWN.join(', ')}.`); process.exit(2); }
 
-const { session, profile } = signInFlags(args, 'walk');
+const { session, profile, landed } = signInFlags(args, 'walk');
 const oi = args.indexOf('--out');
 const slug = String(plan.task || basename(planPath, '.json')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'task';
-const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audits', 'current', 'walks', slug));
+const outDir = resolve(oi >= 0 ? args[oi + 1] : join(auditFolder(args) || join('docs', 'shipright', 'audits', 'current'), 'walks', slug));
 mkdirSync(outDir, { recursive: true });
 // What the owner ruled out when they said yes with limits (null when there is no limits file).
 const limits = useLimits(args, outDir, 'walk');
@@ -232,7 +235,7 @@ if (!remote) {
   const rel = pagePath.startsWith(root) ? pagePath.slice(root.length).split(sep).join('/') : '/' + basename(pagePath);
   startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
-const opened = await openContext({ session, profile, name: 'walk', url: startUrl });
+const opened = await openContext({ session, profile, name: 'walk', url: landedOn(landed, startUrl) || startUrl });
 let runs;
 try { runs = [await walkAt(opened, startUrl, 1280), await walkAt(opened, startUrl, 390)]; }
 finally { await opened.close(); if (server) server.close(); }

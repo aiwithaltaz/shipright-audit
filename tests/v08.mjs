@@ -62,6 +62,53 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
       w.code === 0 && wj.widths['1280'].held_at === 2 && step.held_by === 'send a message' && /the owner ruled this out/.test(step.error || '') && !app.hits.some(h => h.startsWith('use?message')),
       `exit ${w.code}, held at ${wj.widths['1280'].held_at}, ${app.hits.length} call(s) reached the app`);
   }
+
+  // Step 2. One file says how to sign in. The public page of this app never links to /app, which only
+  // opens after sign-in. login.mjs --audit writes signin.json with where the app landed, and the crawl
+  // gets into /app with --audit alone: no --profile, no --session.
+  if (want('signin') && hasPw) {
+    const { startLandingApp } = await import('./fixtures/landing-app/server.mjs');
+    const app = await startLandingApp();
+    const env = { SHIPRIGHT_NO_HEADED: '1' };
+    const audit = tmp('signin-audit'), profile = join(tmp('signin-profile'), 'p');
+    const li = await runNode([S + 'login.mjs', `${app.url}login?auto`, '--headless', '--timeout', '20', '--audit', audit, '--profile', profile], env);
+    const note = readJson(join(audit, 'signin.json'), null);
+    ok('login.mjs --audit writes signin.json: profile, browser, session file and where the app landed',
+      li.code === 0 && !!note && note.profile === profile && !!note.channel && note.session === join(audit, '.session.json') && existsSync(note.session) && note.landed_url === `${app.url}app`,
+      note ? `landed on ${note.landed_url}` : `exit ${li.code}: ${li.err.trim().split('\n').pop()}`);
+    const cr = await runNode([S + 'crawl.mjs', app.url, '--audit', audit], env);
+    const cj = readJson(join(audit, 'screens', 'crawl.json'), { screens: [] });
+    const paths = cj.screens.map(sc => new URL(sc.url).pathname);
+    ok('crawl --audit alone gets into /app, which the public page never links to',
+      cr.code === 0 && ['/', '/app', '/app/projects', '/app/settings'].every(p => paths.includes(p)) && /sign-in profile/.test(cj.signed_in_with || '') && cj.landed_url === `${app.url}app` && paths.slice(1, 4).every(p => p.startsWith('/app')),
+      `exit ${cr.code}: ${paths.join(' ')}`);
+    // Every other script takes --audit too, with no other sign-in flag, and reads the crawl from the audit folder.
+    writeFileSync(join(audit, 'plan.json'), JSON.stringify({ task: 'Open projects', steps: [{ do: 'goto', to: '/app' }, { do: 'click', text: 'Projects' }, { do: 'expect', text: 'Garden plan' }] }));
+    const bad = [];
+    for (const [n, a, file] of [
+      ['explore', [S + 'explore.mjs', app.url, '--audit', audit], 'explore/explore.json'],
+      ['visual', [S + 'visual.mjs', app.url, '--audit', audit, '--no-click'], 'visual/visual.json'],
+      ['samples', [S + 'samples.mjs', app.url, '--audit', audit], 'samples/samples.json'],
+      ['consistency', [S + 'consistency.mjs', app.url, '--audit', audit], 'consistency/consistency.json'],
+      ['walk', [S + 'walk.mjs', app.url, join(audit, 'plan.json'), '--audit', audit], 'walks/open-projects/walk.json'],
+    ]) {
+      const r = await runNode(a, env);
+      if (r.code !== 0 || !/signed in with the sign-in profile/.test(r.err) || !existsSync(join(audit, file))) bad.push(`${n}: exit ${r.code} ${r.err.trim().split('\n').pop()}`);
+    }
+    const vis = readJson(join(audit, 'visual', 'visual.json'), { pages: [] });
+    ok('explore, visual, samples, consistency and walk are signed in with --audit and no other sign-in flag',
+      bad.length === 0 && vis.pages.some(p => p.url.endsWith('/app/settings')), bad.join(' | ') || `5 scripts, ${vis.pages.length} pages checked`);
+    const so = await runNode([S + 'crawl.mjs', app.url, '--audit', audit, '--signed-out'], env);
+    const sj = readJson(join(audit, 'screens-signed-out', 'crawl.json'), { screens: [] });
+    const outPaths = sj.screens.map(sc => new URL(sc.url).pathname);
+    ok('crawl --audit --signed-out ignores the sign-in and writes to screens-signed-out',
+      so.code === 0 && sj.signed_in_session === false && outPaths.includes('/login') && !outPaths.some(p => p.startsWith('/app')), `exit ${so.code}: ${outPaths.join(' ')}`);
+    // A public page with a "Sign in" link is not a signed-in page: nothing is saved until the owner signs in.
+    const audit2 = tmp('signin-public');
+    const pub = await runNode([S + 'login.mjs', app.url, '--headless', '--timeout', '6', '--audit', audit2, '--profile', join(tmp('signin-profile'), 'p')], env);
+    app.stop();
+    ok('login.mjs does not save a sign-in from a public page that still shows "Sign in"', pub.code === 1 && !existsSync(join(audit2, 'signin.json')) && !existsSync(join(audit2, '.session.json')), `exit ${pub.code}`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -2,9 +2,11 @@
 // Open every safe control on each page, the way a curious first-time user would, and record what happens.
 // Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that
 // throws an error the moment you touch it. This finds them.
-// Usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes "#/,/settings"]
-//        [--widths 1280,390] [--profile dir] [--session session.json] [--out dir] [--max 40]
-//        [--allow "Bookmark,Handoff"]
+// Usage: node <skill>/scripts/explore.mjs <index.html|url> --audit <audit> [--use] [--routes "#/,/settings"]
+//        [--widths 1280,390] [--max 40] [--allow "Bookmark,Handoff"]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit: this audit's folder. It reads the sign-in from <audit>/signin.json and the screens from
+// <audit>/screens/crawl.json, and writes to <audit>/explore.
 // --widths: both 1280 and 390 run by default. At the first width every control is explored. At the next
 // widths it explores the controls that only exist there (a phone menu button, a bottom bar) and opens
 // again whatever opened a dialog, menu or panel, so each one is also seen and screenshotted on phone.
@@ -37,18 +39,19 @@
 // format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
 // every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths', '--limits'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths', '--limits', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--widths 1280,390] [--profile dir] [--session file] [--out dir] [--max 40] [--allow "Label,Label"]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'explore'));
+if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> --audit <audit folder> [--use] [--routes ...] [--widths 1280,390] [--max 40] [--allow "Label,Label"] [--crawl crawl.json] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
+const paths = auditPaths(args, 'explore');
+const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
-const { session, profile } = signInFlags(args, 'explore');
+const { session, profile, landed } = signInFlags(args, 'explore');
 const MAX = Number(flag('--max') || 40);
 const allow = (flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const widths = widthsFlag(args);
@@ -77,7 +80,7 @@ const STATE = () => {
 
 const site = await openTarget(target, 'explore');
 const remote = site.remote;
-const ctx = await openContext({ session, profile, name: 'explore', url: site.startUrl, viewport: viewportFor(widths[0]) });
+const ctx = await openContext({ session, profile, name: 'explore', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = ctx.page;
 let errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
@@ -88,7 +91,7 @@ let picker = false;
 page.on('filechooser', () => { picker = true; }); // listening stops the real picker from opening
 page.on('dialog', d => d.dismiss().catch(() => {}));
 
-const urls = pagesToVisit({ startUrl: site.startUrl, remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'explore' });
+const urls = pagesToVisit({ startUrl: site.startUrl, remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'explore' });
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
 const rows = [], found = [];
 let shotN = 0;

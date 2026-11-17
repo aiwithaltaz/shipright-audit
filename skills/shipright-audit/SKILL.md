@@ -60,10 +60,12 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
 2. **Version.** Execute `node <skill>/scripts/version.mjs`. Never stop for it. If it says a newer version is out, end the reply with the update note (below).
 3. **Tools.** Execute `node <skill>/scripts/setup.mjs`. It installs Playwright in a ShipRight tools folder in the user's home, never in the app, and does nothing if Playwright is already there. Do not ask first. If it fails, audit by hand and say what that cost.
 4. **Check the door.** Run the crawl (Step 1). Then:
-   - **Login wall:** execute `node <skill>/scripts/login.mjs <url> --out <audit>/.session.json` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in."  Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. If the window closes without a sign-in, say so and offer to open it again.
-   - **Stay signed in: profile first.** `login.mjs` prints the profile folder it used (`~/.shipright/profiles/<site>`) and the browser. From now on pass `--profile <that folder> --session <audit>/.session.json` to every script. The profile is tried first: many apps swap their sign-in token on every refresh, so the session file goes stale within seconds, while the sign-in window's own profile always holds the newest token. The session file is only the fallback. Run the scripts one at a time, never two on the same profile at once.
+   - **Login wall:** execute `node <skill>/scripts/login.mjs <url> --audit <audit>` yourself and tell the owner in one line: "Your app needs a sign-in. A browser window just opened: sign in there (Google works too) and leave it open. It closes by itself when you're in."  Never ask for a password, a code or an email in chat, and never type one: anything typed in chat is kept in the chat history. If the window closes without a sign-in, say so and offer to open it again.
+   - **A public site with the app behind a sign-in is a login wall too.** When the crawl reached only public pages and one of them links to a sign-in page, run `login.mjs` on that sign-in page's URL. A public page that still shows "Sign in" is never saved as signed in.
+   - **Stay signed in: one file.** `login.mjs` writes `<audit>/signin.json`: the profile folder (`~/.shipright/profiles/<site>`), the browser, the session file (`<audit>/.session.json`) and the page the app landed on after sign-in. From now on every script gets `--audit <audit>` and reads its sign-in from that file. Nothing else is needed: no `--profile`, no `--session` (the old flags still work). The profile is tried first: many apps swap their sign-in token on every refresh, so the session file goes stale within seconds, while the sign-in window's own profile always holds the newest token. The session file is only the fallback. Run the scripts one at a time, never two on the same profile at once.
+   - **Write every command in full.** Every argument written out, in every command, every time. Never put flags in a shell variable: zsh, the default shell on a Mac, passes a variable as one word, so the script gets no flags at all and runs signed out.
    - **Signed out is never silent.** Each script first checks that the app still knows us. If not, it tries the other way once, then stops with "The app signed us out (401). Run login.mjs again." Do that and run the script again. Never go on signed out, and never switch to by-hand without telling the owner why. If a site refuses headless browsers, the script retries once in a window placed off screen and says which mode ran.
-   - In Left behind, name both the session file and the profile folder.
+   - In Left behind, name the session file, `signin.json` and the profile folder.
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported. Never open a file that may list them (see 7) before the gate passes.
@@ -84,15 +86,16 @@ If the owner gives instructions at any point (what to skip, what is allowed), fo
 
 ## Step 1: Reach every screen
 
-`node <skill>/scripts/crawl.mjs <index.html or url> [--profile <profile folder> --session <audit>/.session.json] --out <audit>/screens`
+`node <skill>/scripts/crawl.mjs <index.html or url> --audit <audit>`
 
-`[sign-in]` in the commands below means those same two flags: `--profile <profile folder> --session <audit>/.session.json`. Use them on every script when the app has a login.
+`--audit <audit>` is on every command below. It tells a script where to write (`<audit>/screens`, `<audit>/explore` and so on), where the crawl is, and how to sign in (`<audit>/signin.json`, when the app has a login).
 
+- **The app's own landing page.** When `signin.json` says the app landed on another page after sign-in (for example `/dashboard`), the crawl starts there too and follows that page's links first. An app that the public page never links into is still crawled.
 - It saves every reachable screen at 390 and 1280 wide, with its H1, actions, form fields and console errors.
 - Every script waits for each page to settle (no spinners, numbers stop changing) before reading it. `crawl.md` marks a screen that never settled as **may be mid-load**: do not cite its counts or empty messages as real.
 - If Playwright's own browser will not start, every script falls back to the installed Microsoft Edge, then Google Chrome, then Playwright's WebKit. To force one, set `SHIPRIGHT_BROWSER=msedge` (or `chrome`, `webkit`).
 - `crawl.md` flags a **login wall**, **mostly empty** screens, and **label drift** (links that go to the same place under different words).
-- **Signed out too.** When the app has a login, also crawl once without the sign-in flags (into `<audit>/screens-signed-out`), so the sign-in, sign-up and reset pages get audited. Owners judge those first.
+- **Signed out too.** When the app has a login, also execute `node <skill>/scripts/crawl.mjs <url> --audit <audit> --signed-out` (it writes to `<audit>/screens-signed-out`), so the sign-in, sign-up and reset pages get audited. Owners judge those first.
 - **By hand when the scripts cannot reach the site** (for example an app only the owner's own browser is signed in to): use a browser tool, visit each screen at 1280 and 390 and save each screenshot into `<audit>/screens/`. Paste `<skill>/scripts/analyze-page.js` into the tool's JavaScript runner followed by `JSON.stringify(SHIPRIGHT_ANALYZE())` on each main page, at 1280 and again at 390: it runs the same checks as `visual.mjs` (clipped text, media that never loaded and layout shift included). On a page that holds a result, use `SHIPRIGHT_ANALYZE({ results: true })`. Do Steps 1b and 1c by hand with the same rules. Say in the header that the audit ran by hand, and why.
 - If no browser can be used at all, visit what you can, record the width you actually saw, and put any width you did not see in Not verified.
 
@@ -100,7 +103,7 @@ Done when you can list every screen in scope, each with its 1280 and its 390 scr
 
 ## Step 1b: Open every safe control
 
-Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/explore`.
+Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that errors the moment you touch it. Execute `node <skill>/scripts/explore.mjs <index.html or url> --audit <audit>`.
 
 - It runs at 1280 and at 390 wide (`--widths 1280,390` is the default). At 390 it explores the controls that only exist on phone and opens again whatever opened a dialog, menu or panel, so each one is seen on phone too. Text cut off inside what opened is a lead.
 - It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
@@ -111,7 +114,7 @@ Audits miss what they never open: a dialog behind an icon, a button that does no
 
 ## Step 1c: Open existing results (read-only)
 
-The owner's own data is the best test data. A generated image that never shows, a reply footer cut off on phone, a row of unnamed icons under an answer: these only appear on a page that holds a real result, and an audit that only looks at empty screens never sees them. Execute `node <skill>/scripts/samples.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/samples`.
+The owner's own data is the best test data. A generated image that never shows, a reply footer cut off on phone, a row of unnamed icons under an answer: these only appear on a page that holds a real result, and an audit that only looks at empty screens never sees them. Execute `node <skill>/scripts/samples.mjs <index.html or url> --audit <audit>`.
 
 - It finds item lists (past chats, library, projects, files: links in a navigation, side panel, list or table that share a pattern), opens up to 5 items per list (`--samples N`), and prefers items whose page holds images, files, code, artifacts, or tool and connector results.
 - On each item, at 1280 and 390, it scrolls through, saves a full-page screenshot and runs the page checks plus the result checks: **media that never loaded** (a broken image, a dead video, a "click to load image" placeholder where the media should be), **clipped text**, and **action buttons with no name**.
@@ -129,7 +132,7 @@ From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. W
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note where it broke.
 
 1. Write a plan file, `<audit>/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step. A step the owner's limits rule out (`use-limits.json`) is held even with that mark.
-2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [sign-in] --out <audit>/walks/<task>`.
+2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json --audit <audit> --out <audit>/walks/<task>`.
 3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
 4. Use those step screenshots as evidence for pains inside the flow.
 5. **Test messages (only after the owner's yes).** A step with `"owner_said_yes": true` runs once, at 1280, so the app gets one test message, not two. After an owner-approved click or key press the walker waits for the result to settle, then checks it at 1280 and at 390: media that loaded, text that is not cut off, action buttons with names. Each problem is a lead (`W-...`) in `walk.md`: decide it in Script leads. Open the `*-result.png` screenshots too and judge the result yourself.
@@ -159,8 +162,8 @@ Owners judge their app against the apps their users already know, and users expe
 
 Usability lenses miss what a design lead sees in a second: a sentence stuffed into a pill, a count that promises work that is not there, cards whose dates do not line up, a menu with the wrong corners hiding behind a sticky bar. Check these on purpose.
 
-1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/visual`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
-2. **Design-system drift.** Execute `node <skill>/scripts/consistency.mjs <index.html or url> --crawl <audit>/screens/crawl.json [sign-in] --out <audit>/consistency`. On every screen, signed in, it measures search inputs, text inputs, dropdowns, primary buttons, cards, list rows and side panels, and compares corner radius, background, border, height and font size across screens. When most screens share one look and one screen differs, that is a **component drift** lead (C##) with a crop of the usual look and of the odd one out. Its inventory table is a signal for the taste pass.
+1. Execute `node <skill>/scripts/visual.mjs <index.html or url> --audit <audit>`. It checks every screen at 1280 and at 390 wide (`--widths 1280,390` is the default). It measures alignment and spacing in repeated cards, sentence and crowded pills, too many labels on a card, a main action buried at the bottom of a tall card, corner drift, menus covered by other layers or off screen, counts with nothing behind them, and **clipped text**: words cut off by their box, shortened with "...", or running past the edge of the screen. It opens menus but never clicks risky words. The same problem on several pages or widths is one lead. A lead that says "at 390 wide only" is a phone pain.
+2. **Design-system drift.** Execute `node <skill>/scripts/consistency.mjs <index.html or url> --audit <audit>`. On every screen, signed in, it measures search inputs, text inputs, dropdowns, primary buttons, cards, list rows and side panels, and compares corner radius, background, border, height and font size across screens. When most screens share one look and one screen differs, that is a **component drift** lead (C##) with a crop of the usual look and of the odd one out. Its inventory table is a signal for the taste pass.
 3. **Motion.** `visual.mjs` reports a page that **jumps after it has loaded** (layout shift over 0.1: a banner that arrives late, an image with no size). `explore.mjs` reports a menu or dialog that makes the page behind it jump when it opens, and, with the browser set to **reduce motion**, anything that still slides, zooms or spins without need.
 4. Open `visual.md`, `explore.md`, `samples.md`, `consistency.md` and each crop. **Decide every lead** (V##, E##, R## and C##) in the pain map's **Script leads** table: the pain ID it became, or `Rejected: <what you saw on the crop>`. A lead you saw and dropped without a reason is the most common way an audit misses what the owner sees in a second, so the gate refuses a ledger with gaps. Merge leads that are one problem into one pain.
 5. Read `references/visual-craft.md`. Look at each main screen at full desktop width with its checks (pills, counts, density, where the main action sits, alignment, spacing, shape, layering). Scripts cannot judge density or meaning; you must.
@@ -255,7 +258,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Every Now pain has a chosen fix, its principle and a test.
 - [ ] No pain is marked Reported unless the owner or a user said it.
 - [ ] Not verified lists everything you could not check, including any screen or width you did not see, any feature you could not use, and anything a script could not reach.
-- [ ] Left behind lists everything you created or changed (test messages, test items, switches flipped, the session file, the sign-in profile folder), or says "Nothing".
+- [ ] Left behind lists everything you created or changed (test messages, test items, switches flipped, the session file, `signin.json`, the sign-in profile folder), or says "Nothing".
 
 **The header.** Under the title, the pain map states: the date, screens in scope, tasks walked, `Controls opened: N of M`, reviewers, method, widths seen and data, then `Phone coverage: X of Y in-scope screens`, `Used as a user:` with one of `yes (N actions)`, `yes with limits: "<owner's words>" (N actions)`, `no` or `not answered (unattended)`, and `Competitor research: live, checked <date>` or `from knowledge, no web tool`, then Scope, Out of scope and Context used (owner rules read, files skipped for fairness).
 
@@ -275,7 +278,7 @@ Keep it short. In this order:
 6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide". Things that may be on purpose (a name, a tone, a style) are asked here, never listed as pains.
 7. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
 8. **Not verified:** what you could not check: screens or widths not seen, features not used (when the owner said no or the session was unattended: "How features behave when used (switches, sending, results)"; on yes with limits: each thing the owner's limits held), hardware features, and anything a script could not reach.
-9. **Left behind:** everything you created or changed in the app (every test message and test item, every switch flipped and whether it is back, drafts, notifications) and in the folder (packages, the session file, the sign-in profile folder in `~/.shipright/profiles`). Offer to remove what you can. Always remind the owner to delete `.session.json` and the profile folder: both hold their sign-in.
+9. **Left behind:** everything you created or changed in the app (every test message and test item, every switch flipped and whether it is back, drafts, notifications) and in the folder (packages, the session file, the sign-in profile folder in `~/.shipright/profiles`). Offer to remove what you can. Always remind the owner to delete `.session.json` and the profile folder: both hold their sign-in. `signin.json` only holds their paths.
 10. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
 11. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
 
@@ -286,6 +289,7 @@ Keep it short. In this order:
 - Treat silence as a no in a live session, or ask the use-it question and go on in the same message past a step that needs the answer.
 - Do anything the owner's limits rule out.
 - Go on signed out after a script said "The app signed us out".
+- Put script flags in a shell variable, or shorten a command.
 - Open a file that may list the owner's current complaints before the gate passes.
 - List an owner decision, or a feature's own name, as a pain.
 - Ask for, or type, a password or sign-in code in chat.

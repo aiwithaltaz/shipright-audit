@@ -8,7 +8,7 @@
 // when it had to fall back. SHIPRIGHT_BROWSER: chromium | msedge | chrome | webkit
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -156,13 +156,52 @@ export async function looksSignedIn(page) {
   return !hasPassword && !LOGIN_URL.test(new URL(page.url()).pathname);
 }
 
-// Read --session and --profile from a script's arguments. A path that does not exist is a usage error.
+// One file per audit says how to sign in: <audit>/signin.json, written by login.mjs --audit <audit>.
+//   { "site", "start_url", "landed_url", "profile", "channel", "browser", "session", "signed_in_at" }
+// Every script takes --audit <audit> and reads its sign-in from that file, so no command has to spell
+// out --profile or --session (and nobody is tempted to keep them in a shell variable, which zsh passes
+// as one word, so the script gets no flags at all and runs signed out).
+// landed_url is where the app went after sign-in, when that is not the start URL: an app the landing
+// page never links into is still reached, and the sign-in check runs on a page that needs the sign-in.
+export const SIGNIN_NOTE = 'signin.json';
+export const auditFolder = args => { const i = args.indexOf('--audit'); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? resolve(args[i + 1]) : null; };
+export function readSignIn(audit) { try { return JSON.parse(readFileSync(join(audit, SIGNIN_NOTE), 'utf8')); } catch { return null; } }
+export function writeSignIn(audit, info) { mkdirSync(audit, { recursive: true }); writeFileSync(join(audit, SIGNIN_NOTE), JSON.stringify(info, null, 2) + '\n'); return join(audit, SIGNIN_NOTE); }
+
+// Read the sign-in from a script's arguments: --profile and --session when given, the rest from
+// <audit>/signin.json (--audit). --signed-out ignores them all, for the signed-out crawl.
+// A path that does not exist is a usage error. Returns { session, profile, landed, audit }.
 export function signInFlags(args, name = 'audit') {
   const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-  const session = flag('--session'), profile = flag('--profile');
+  const audit = auditFolder(args);
+  if (args.includes('--signed-out')) return { session: undefined, profile: undefined, landed: null, audit };
+  let session = flag('--session'), profile = flag('--profile'), landed = null;
   if (session && !existsSync(session)) { console.error(`${name}: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
   if (profile && !(existsSync(profile) && statSync(profile).isDirectory())) { console.error(`${name}: profile folder ${profile} not found. Run login.mjs first: it prints the profile path to use.`); process.exit(2); }
-  return { session: session ? resolve(session) : undefined, profile: profile ? resolve(profile) : undefined };
+  if (audit && existsSync(join(audit, SIGNIN_NOTE))) {
+    const note = readSignIn(audit);
+    if (!note) { console.error(`${name}: ${join(audit, SIGNIN_NOTE)} is not valid JSON. Run login.mjs again with --audit "${audit}".`); process.exit(2); }
+    const given = !!(session || profile);
+    const hasProfile = note.profile && existsSync(note.profile) && statSync(note.profile).isDirectory();
+    const hasSession = note.session && existsSync(note.session);
+    if (!profile && hasProfile) profile = note.profile;
+    if (!session && hasSession) session = note.session;
+    if (!given && !profile && !session) { console.error(`${name}: ${join(audit, SIGNIN_NOTE)} points to a sign-in profile and a session file that are gone. Run login.mjs again with --audit "${audit}".`); process.exit(2); }
+    landed = note.landed_url || null;
+  }
+  return { session: session ? resolve(session) : undefined, profile: profile ? resolve(profile) : undefined, landed, audit };
+}
+// The page to check the sign-in on, and to visit first: where the app landed after sign-in, when that
+// is on the same site as the start page. Otherwise null.
+export function landedOn(landed, startUrl) {
+  try { const a = new URL(landed), b = new URL(startUrl); return a.origin === b.origin && normUrl(a.href) !== normUrl(b.href) ? a.href : null; } catch { return null; }
+}
+// Defaults from --audit: where a script writes, and the crawl it reads.
+export function auditPaths(args, sub) {
+  const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
+  const audit = auditFolder(args);
+  const crawl = flag('--crawl') || (audit && existsSync(join(audit, 'screens', 'crawl.json')) ? join(audit, 'screens', 'crawl.json') : undefined);
+  return { audit, out: resolve(flag('--out') || (audit ? join(audit, sub) : join('docs', 'shipright', 'audits', 'current', sub))), crawl };
 }
 
 export const SIGNED_OUT_EXIT = 3;
@@ -309,9 +348,11 @@ export async function openTarget(target, name = 'audit') {
   return { remote: false, startUrl: `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`, root, stop: () => server.close() };
 }
 
-// Every page a script should visit: the start page, --routes, and every screen in a crawl.json.
-export function pagesToVisit({ startUrl, remote, routes, crawl, name = 'audit' }) {
+// Every page a script should visit: the start page, where the app landed after sign-in (signin.json),
+// --routes, and every screen in a crawl.json.
+export function pagesToVisit({ startUrl, remote, routes, crawl, landed = null, name = 'audit' }) {
   const urls = [startUrl];
+  if (landedOn(landed, startUrl)) urls.push(landedOn(landed, startUrl));
   for (const r of (routes || '').split(',').map(s => s.trim()).filter(Boolean)) urls.push(/^https?:/.test(r) ? r : new URL(r, startUrl).href);
   if (crawl) {
     try {

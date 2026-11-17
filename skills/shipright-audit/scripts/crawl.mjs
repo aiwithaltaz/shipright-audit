@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // Visit every reachable screen of a local app or URL.
-// Usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--profile dir] [--session session.json] [--json]
+// Usage: node <skill>/scripts/crawl.mjs <index.html|url> --audit <audit> [--signed-out] [--out dir] [--json]
+//        (older form, still works: [--profile dir] [--session session.json] --out dir)
+// --audit:   this audit's folder. The sign-in is read from <audit>/signin.json (written by login.mjs
+//            --audit), and the screens go to <audit>/screens. If the app landed on another page after
+//            sign-in (signin.json "landed_url"), the crawl starts there too, and follows that page's
+//            links first: an app the landing page never links into is still crawled.
+// --signed-out: ignore the sign-in, to audit the sign-in, sign-up and reset pages. Writes to
+//            <audit>/screens-signed-out.
 // --profile: the sign-in window's browser profile (login.mjs prints its path). Use it first: it always
 //            holds the newest sign-in, even when the app swaps its sign-in token on every refresh.
 // --session: a signed-in session file saved by login.mjs. The fallback when the profile cannot be used.
@@ -15,7 +22,7 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl, linkPattern } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, linkPattern, landedOn, auditFolder } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -23,18 +30,19 @@ import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const target = args.find((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile'].includes(args[i - 1]));
+const target = args.find((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile', '--audit'].includes(args[i - 1]));
 if (!target) {
-  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> [--out dir] [--profile dir] [--session session.json] [--json]');
+  console.error('usage: node <skill>/scripts/crawl.mjs <index.html|url> --audit <audit folder> [--signed-out] [--out dir] [--profile dir] [--session session.json] [--json]');
   process.exit(2);
 }
 const flag = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const wantJson = args.includes('--json');
-const { session, profile } = signInFlags(args, 'crawl');
+const { session, profile, landed } = signInFlags(args, 'crawl');
+const audit = auditFolder(args);
 const remote = /^https?:/.test(target);
 const pagePath = remote ? null : resolve(target);
 const root = remote ? null : (existsSync(pagePath) && statSync(pagePath).isDirectory() ? pagePath : dirname(pagePath));
-const outDir = resolve(flag('--out') || join(root || '.', 'crawl-out'));
+const outDir = resolve(flag('--out') || (audit ? join(audit, args.includes('--signed-out') ? 'screens-signed-out' : 'screens') : join(root || '.', 'crawl-out')));
 mkdirSync(outDir, { recursive: true });
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.woff2': 'font/woff2' };
 
@@ -131,7 +139,10 @@ if (!remote) {
   startUrl = `http://127.0.0.1:${port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
 // Opens the browser and, with --profile or --session, checks that the app still knows us (exit 3 if not).
-const opened = await openContext({ session, profile, name: 'crawl', url: startUrl,
+// With a landing page from signin.json, check the sign-in there: a public start page looks the same
+// signed in or out, so it cannot tell us whether the app still knows us.
+const landedUrl = landedOn(landed, startUrl);
+const opened = await openContext({ session, profile, name: 'crawl', url: landedUrl || startUrl,
   launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] } });
 const usingSignIn = opened.mode !== 'none';
 const page = opened.page;
@@ -150,31 +161,35 @@ try {
   const did = usingSignIn ? false : await signIn(page);
   if (did) { settled = await settle(page); screens.push({ ...(await snapshot(page, 's02', true)), settled }); }
   const queue = [];
+  // Pages inside the app come first: where the app landed after sign-in, and every link found from there.
+  // In-app places, then in-app items, then the public places, then the public items.
+  const first = [], firstItems = [], inApp = new Set();
   // A list of items ("/chat/abc", "/chat/xyz", 40 more) is one kind of screen. Places (Settings,
   // Library) are visited first, then up to PER_LIST items of each list, so a long history does not use
   // up the crawl before it reaches Settings. samples.mjs opens more of each list.
   const itemQueue = [];
-  const pushLinks = links => {
+  const pushLinks = (links, fromApp = false) => {
     for (const href of links || []) {
       if (!sameApp(href, page.url())) continue;
       const abs = normUrl(new URL(href, page.url()).href);
-      if (seen.has(abs) || queue.includes(abs) || itemQueue.includes(abs)) continue;
+      if (seen.has(abs) || queue.includes(abs) || itemQueue.includes(abs) || first.includes(abs) || firstItems.includes(abs)) continue;
       const pat = linkPattern(abs);
-      if (!pat) { queue.push(abs); continue; }
+      if (!pat) { if (fromApp) { first.push(abs); inApp.add(abs); } else queue.push(abs); continue; }
       const list = itemLists.get(pat) || { pattern: pat.replace(/^https?:\/\/[^/]+/, ''), links: new Set(), crawled: 0 };
       itemLists.set(pat, list);
       if (list.links.has(abs)) continue;
       list.links.add(abs);
       if (list.crawled >= PER_LIST) continue;
       list.crawled++;
-      itemQueue.push(abs);
+      if (fromApp) { firstItems.push(abs); inApp.add(abs); } else itemQueue.push(abs);
     }
   };
   seen.add(normUrl(page.url()));
   for (const s of screens) { seen.add(normUrl(s.url)); pushLinks(s.links); }
+  if (landedUrl && !seen.has(normUrl(landedUrl))) { first.push(normUrl(landedUrl)); inApp.add(normUrl(landedUrl)); }
   let n = screens.length;
-  while ((queue.length || itemQueue.length) && n < 12) {
-    const next = queue.length ? queue.shift() : itemQueue.shift();
+  while ((first.length || firstItems.length || queue.length || itemQueue.length) && n < 12) {
+    const next = first.length ? first.shift() : firstItems.length ? firstItems.shift() : queue.length ? queue.shift() : itemQueue.shift();
     if (seen.has(next)) continue;
     seen.add(next);
     await page.goto(next, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -183,7 +198,8 @@ try {
     const id = `s${String(n).padStart(2, '0')}`;
     const shot = { ...(await snapshot(page, id, true)), settled };
     screens.push(shot);
-    pushLinks(shot.links);
+    // A redirect inside the app (/app to /app/home) is still inside the app.
+    pushLinks(shot.links, inApp.has(next));
   }
 } finally {
   await opened.close();
@@ -208,7 +224,7 @@ const unsettled = screens.filter(s => s.settled === false).map(s => s.id);
 // A screen that asks for a password after we came in signed in may mean the app signed us out mid-crawl.
 const askedLater = usingSignIn ? screens.filter((s, i) => i > 0 && s.asks_password).map(s => s.id) : [];
 const lists = [...itemLists.values()].map(l => ({ pattern: l.pattern, links: l.links.size, crawled: [...l.links].filter(u => seen.has(u)).length })).filter(l => l.links > l.crawled);
-const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, login_wall: loginWall, empty_screens: emptyScreens, unsettled, item_lists: lists, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, landed_url: landedUrl, login_wall: loginWall, empty_screens: emptyScreens, unsettled, item_lists: lists, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
@@ -217,7 +233,7 @@ for (const s of report.screens) {
 if (loginWall) md.splice(1, 0, '', '> **Login wall:** every screen reached asks for a password. Stop and ask the owner for a way in (login.mjs), or audit only the sign-in screens and say so.');
 if (emptyScreens && emptyScreens * 2 >= screens.length) md.splice(1, 0, '', `> **Mostly empty:** ${emptyScreens} of ${screens.length} screens show little or no data. Density, pill and alignment problems hide on empty screens. Ask for an account with realistic data.`);
 if (askedLater.length) md.splice(1, 0, '', `> **Check the sign-in:** ${askedLater.join(', ')} ask for a password although the crawl started signed in. If that is the sign-in page, the app signed us out mid-crawl: run login.mjs again and crawl again.`);
-if (usingSignIn) md.splice(1, 0, '', `Signed in with ${opened.label}.`);
+if (usingSignIn) md.splice(1, 0, '', `Signed in with ${opened.label}.${landedUrl ? ` After sign-in the app landed on ${landedUrl.replace(/^https?:\/\/[^/]+/, '')}: the crawl started there too.` : ''}`);
 if (unsettled.length) md.splice(1, 0, '', `> **Still loading:** ${unsettled.join(', ')} kept changing for 10 seconds. Their counts and empty messages may be the loading state, not the real data. Check them before citing.`);
 if (labelDrift.length) {
   md.push('', '## Label drift (same destination, different words)', '', '| Goes to | Labels used | Screens |', '| --- | --- | --- |');
