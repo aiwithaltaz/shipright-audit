@@ -76,10 +76,15 @@ if (hasPw) {
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
   busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
-  const noise = busy.findings.filter(f => f.width === 1280).length;
+  // One lead on this app is real and listed: the answer key says Reports shows lorem ipsum, and the
+  // template-text check (new in 0.8) finds it. Everything else must stay quiet.
+  const listed = l => l.kind === 'template-text' && /lorem ipsum/i.test(l.what);
+  const noise = busy.findings.filter(f => f.width === 1280 && !listed(f)).length;
   ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
-  // At 390 the only lead is the one the answer key lists for this app: tables wider than a phone screen.
-  const phoneLeads = busy.leads.filter(l => l.widths.includes(390));
+  const lorem = busy.leads.filter(listed);
+  ok('visual checker finds the placeholder text the answer key lists on Reports', lorem.length === 1 && lorem[0].pages.join() === '/index.html#/reports', lorem.map(l => l.pages.join()).join(' | ') || 'not found');
+  // At 390 the only other lead is the one the answer key lists for this app: tables wider than a phone screen.
+  const phoneLeads = busy.leads.filter(l => l.widths.includes(390) && !listed(l));
   ok('visual checker at 390: only the sideways tables the answer key lists', phoneLeads.length === 1 && phoneLeads[0].kind === 'clipped-text' && phoneLeads[0].detail.how === 'screen' && phoneLeads[0].pages.every(p => /#\/(shifts|volunteers)$/.test(p)), phoneLeads.map(l => `${l.kind} on ${l.pages.join(', ')}`).join(' | ') || 'none');
   // 8b. Clipped text: a reply footer cut off at 390 and fine at 1280 is one lead, at 390 only.
   // The same page holds things that must not be flagged: long chat titles shortened in a list, a row

@@ -173,6 +173,40 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     ok('owner-rules reads nothing from a folder that never mentions the app, and reads it once it does',
       unrelated && rel.status === 0 && existsSync(otherOut) && /Buttons always use 8px corners/.test(readFileSync(otherOut, 'utf8')), `${un.stdout.trim().slice(0, 50)} / ${rel.stdout.trim().slice(0, 40)}`);
   }
+
+  // Step 5. Five new page checks. One fixture page per check triggers it exactly once, a clean page
+  // that holds the look-alikes triggers none, and every existing fixture and benchmark app stays at 0
+  // new leads, except one lead that is real: a benchmark app's Reports page shows lorem ipsum, and its
+  // answer key lists that as a planted pain.
+  if (want('checks') && hasPw) {
+    const NEW = ['template-text', 'faint-icon', 'overflow-box', 'duplicate-on-screen', 'stacked-controls'];
+    const visual = (target, extra = []) => { const o = tmp('checks'); runSync([S + 'visual.mjs', target, ...extra, '--no-click', '--out', o]); return { o, leads: readJson(join(o, 'visual.json'), { leads: [{ kind: 'did not run', widths: [] }] }).leads }; };
+    const pages = [['template', 'template-text', /\[verb\] your \{noun\}/], ['faint-icon', 'faint-icon', /3 icons are hard to see: contrast 1\.\d:1/], ['overflow', 'overflow-box', /sticks out of its box by \d+px/],
+      ['duplicate', 'duplicate-on-screen', /The same text shows twice/], ['duplicate-nav', 'duplicate-on-screen', /"Calendar" is on this screen twice: in the "Main" side navigation and in the "Project views" tabs/], ['stacked', 'stacked-controls', /Could these be one row\?/]];
+    for (const [page, kind, words] of pages) {
+      const { o, leads } = visual(`tests/fixtures/checks-app/${page}.html`);
+      const mine = leads.filter(l => NEW.includes(l.kind));
+      ok(`${kind}: the ${page} fixture page triggers it exactly once, with a crop`, mine.length === 1 && mine[0].kind === kind && words.test(mine[0].what) && mine[0].widths.includes(1280) && !!mine[0].shot && existsSync(join(o, mine[0].shot)),
+        mine.map(l => `${l.kind} @${l.widths.join('+')}: ${l.what.slice(0, 70)}`).join(' | ') || 'no lead');
+    }
+    const clean = visual('tests/fixtures/checks-app/clean.html').leads.filter(l => NEW.includes(l.kind));
+    ok('the clean fixture page triggers none of the 5 new checks', clean.length === 0, clean.map(l => `${l.kind}: ${l.what.slice(0, 60)}`).join(' | ') || 'no leads');
+    const loud = [];
+    let real = 0;
+    const sweep = [...['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app', 'shift-app', 'use-app', 'results-app', 'button-cards-app'].map(f => [f, `tests/fixtures/${f}/index.html`, []]),
+      ['results-app items', 'tests/fixtures/results-app/index.html', ['--routes', '#/c/1,#/c/2,#/c/3']],
+      ['benchmark s1', 'benchmarks/cases/s1-pawsh-grooming/app/index.html', ['--routes', '#/services,#/book,#/bookings,#/bookings/past,#/contact,#/does-not-exist']],
+      ['benchmark s2', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', ['--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports']],
+      ['benchmark s3', 'benchmarks/cases/s3-northwind-maintenance/app/index.html', ['--routes', '#/requests,#/urgent,#/properties,#/vendors']],
+      ['benchmark c7', 'benchmarks/cases/c7-ivc-app/app/index.html', []]];
+    for (const [name, target, extra] of sweep) {
+      for (const l of visual(target, extra).leads.filter(x => NEW.includes(x.kind))) {
+        if (name === 'benchmark s2' && l.kind === 'template-text' && /lorem ipsum/i.test(l.what) && l.pages.join() === '/index.html#/reports') real++;
+        else loud.push(`${name}: ${l.kind} ${l.what.slice(0, 60)}`);
+      }
+    }
+    ok('the 5 new checks add 0 false alarms to the existing fixtures and benchmark apps', loud.length === 0 && real === 1, loud.join(' | ') || `${sweep.length} apps, 1 real lead (lorem ipsum on a benchmark's Reports page, in its answer key)`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

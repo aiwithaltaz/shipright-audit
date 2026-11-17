@@ -17,6 +17,17 @@
 // since window.__srShiftFrom, a performance.now() time you can set). The first render does not count
 // (anything up to 300ms after the load event): only jumps a person sees after the page looked ready.
 // Run it after the page has settled. Over 0.1 is a lead.
+// Five checks added in 0.8, each a lead at every width (see references/visual-craft.md, V9 to V13):
+//   template-text        placeholder text left in view: "[topic]", "{name}", "{{ title }}", "%s", "${x}",
+//                        "lorem ipsum", "undefined", "null", "NaN", "[object Object]", "TODO: ..."
+//   faint-icon           icons in controls or next to labels with under 3:1 contrast against their real
+//                        background (WCAG 1.4.11), measured from the SVG stroke or fill or the icon font
+//                        color, with opacity included
+//   overflow-box         a chip, pill, badge or button that sticks out of its card by more than 2px
+//   duplicate-on-screen  the same text block (40 characters or more) in two sections, or the same
+//                        control in two navigations
+//   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
+// A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
 // Reduced motion: switch the browser to "reduce motion" (in DevTools: Rendering, Emulate CSS media
 // feature prefers-reduced-motion), reload, open a menu and run it at once. Anything still moving is a lead.
 var SHIPRIGHT_ANALYZE = (opts = {}) => {
@@ -41,6 +52,54 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
     return true;
   };
   const inScope = el => !opts.within || !!el.closest(opts.within);
+
+  // Colors, for the contrast checks. A 1px canvas turns any CSS color (rgb, hsl, oklch, color-mix) into
+  // red, green, blue and alpha. null means "cannot tell" (a gradient, an image, a pattern).
+  const colorCache = new Map();
+  let colorCtx = null;
+  const rgba = value => {
+    if (!value || value === 'none' || /^url\(|gradient|^var\(/i.test(value)) return null;
+    if (colorCache.has(value)) return colorCache.get(value);
+    let out = null;
+    const m = String(value).match(/^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/);
+    if (m) out = { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : +m[4]) };
+    else {
+      try {
+        if (!colorCtx) { const cv = document.createElement('canvas'); cv.width = cv.height = 1; colorCtx = cv.getContext('2d', { willReadFrequently: true }); }
+        colorCtx.clearRect(0, 0, 1, 1); colorCtx.fillStyle = '#000'; colorCtx.fillStyle = value;
+        colorCtx.fillRect(0, 0, 1, 1);
+        const d = colorCtx.getImageData(0, 0, 1, 1).data;
+        out = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+      } catch (e) { out = null; }
+    }
+    colorCache.set(value, out);
+    return out;
+  };
+  const over = (top, under) => { const a = top.a; return { r: top.r * a + under.r * (1 - a), g: top.g * a + under.g * (1 - a), b: top.b * a + under.b * (1 - a), a: 1 }; };
+  const lum = c => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+  const contrast = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  // The color really behind an element: its ancestors' backgrounds, stacked until one is solid.
+  // null when a background image or gradient sits in between, because then it cannot be measured.
+  const backdrop = el => {
+    const layers = [];
+    for (let x = el.parentElement; x; x = x.parentElement) {
+      const cs = getComputedStyle(x);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return null;
+      const c = rgba(cs.backgroundColor);
+      if (!c) return null;
+      if (c.a > 0.01) layers.push(c);
+      if (c.a >= 0.99) break;
+    }
+    let base = { r: 255, g: 255, b: 255, a: 1 };
+    for (const c of layers.reverse()) base = over(c, base);
+    return base;
+  };
+  const hex = c => '#' + [c.r, c.g, c.b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const pageBox = (rects, pad = 8) => {
+    const x0 = Math.max(0, Math.min(...rects.map(r => r.left)) + scrollX - pad), y0 = Math.max(0, Math.min(...rects.map(r => r.top)) + scrollY - pad);
+    const x1 = Math.max(...rects.map(r => r.right)) + scrollX + pad, y1 = Math.max(...rects.map(r => r.bottom)) + scrollY + pad;
+    return { x: Math.round(x0), y: Math.round(y0), width: Math.round(Math.min(x1 - x0, 1400)), height: Math.round(Math.min(y1 - y0, 1200)) };
+  };
 
   // Pills: small, fully rounded, filled or outlined chips with text.
   const isPill = el => {
@@ -278,6 +337,305 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   }
 
   const describe = el => { if (!el || !el.tagName) return 'the page'; const t = text(el).slice(0, 50); const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/)[0] : ''; return `${el.tagName.toLowerCase()}${cls}${t ? ` "${t}"` : ''}`; };
+
+  // ---- Template text: placeholder patterns left in view ------------------------------------------
+  // "[topic]", "{name}", "{{ title }}", "%s", "${count}", "lorem ipsum", "undefined", "null", "NaN",
+  // "[object Object]", "TODO: ...". Not checked: code, keyboard keys, inputs, text areas and editors.
+  {
+    const SKIP = 'script, style, noscript, template, code, pre, kbd, samp, var, textarea, input, select, option, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], [role=textbox], [class*=editor i], .CodeMirror, .ProseMirror, [aria-hidden="true"]';
+    // Words people do put in brackets on purpose: stage notes in a transcript, a tag, an editor's note.
+    const BRACKET_OK = /^(optional|required|beta|new|sic|draft|deleted|removed|redacted|edited|link|citation needed|more|ok|n\/?a|tbd|video|image|photo|audio|music|applause|laughter|laughs|inaudible|crosstalk|silence|pause|pdf|note|update|updated|solved|closed|resolved|wip|nsfw|oc|sponsored|ad|pinned|locked|archived)$/i;
+    const BRACKET_FILL = /^(your|my|insert|enter|add|company|first|last|full|user|client|customer|product|brand|business)\b/i;
+    const short = t => t.length <= 60;
+    const TESTS = [
+      ['curly braces', t => /\{\{\s*[\w.$ |-]{1,40}\s*\}\}|\{\s*[a-z_$][\w.$]{0,30}\s*\}|\{\d{1,2}\}/i.test(t)],
+      ['${...}', t => /\$\{[^}]{0,40}\}/.test(t)],
+      ['square brackets', t => [...t.matchAll(/\[([a-z][a-z0-9 _-]{1,30})\]/gi)].some(m => {
+        const inner = m[1].trim();
+        if (BRACKET_OK.test(inner)) return false;
+        // A stage note like "[Hook]" or "[Verse 2]" is written on purpose. A slot is lowercase ("[topic]"),
+        // all capitals ("[NAME]") or starts with a fill-in word ("[Your name]").
+        const slot = inner === inner.toLowerCase() || (inner === inner.toUpperCase() && /[A-Z]/.test(inner)) || BRACKET_FILL.test(inner);
+        return slot && (/[\p{L}]/u.test(t.replace(m[0], '')) || BRACKET_FILL.test(inner) || inner === inner.toUpperCase());
+      })],
+      ['%s', t => /(^|[\s"'(>:])%(\d+\$)?[sd](?=$|[\s"'.,;:!?)<])/.test(t)],
+      ['lorem ipsum', t => /lorem ipsum/i.test(t)],
+      ['[object Object]', t => /\[object \w+\]/.test(t)],
+      ['NaN', t => /(^|[^\w])NaN(?![\w])/.test(t)],
+      ['undefined', t => short(t) && /(^|[^\w.])undefined(?![\w(])/.test(t)],
+      ['null', t => short(t) && /(^|[\s:,(])null(?=$|[\s,.)%!?])/.test(t) && !/null and void/i.test(t)],
+      ['TODO', t => /\b(TODO|FIXME)\b\s*[:(-]|\b(TODO|FIXME)\b\s+[a-z]/.test(t)],
+    ];
+    const hits = [];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const t = n.textContent.replace(/\s+/g, ' ').trim();
+      if (t.length < 2 || t.length > 400) continue;
+      const p = n.parentElement;
+      if (!p || p.closest(SKIP) || !inScope(p) || !shown(p)) continue;
+      const how = TESTS.filter(([, test]) => test(t)).map(([name]) => name);
+      if (how.length && !hits.some(h => h.text === t)) hits.push({ text: t, how, el: p });
+    }
+    if (hits.length) {
+      let el = hits[0].el;
+      while (el.parentElement && el.parentElement !== document.body && (getComputedStyle(el).display.startsWith('inline') || el.getBoundingClientRect().height < 20) && el.parentElement.getBoundingClientRect().height <= 300) el = el.parentElement;
+      add({ kind: 'template-text', group: 'template-text', what: `Template text is showing: "${hits[0].text.slice(0, 90)}"${hits.length > 1 ? ` (and ${hits.length - 1} more like it)` : ''}`, detail: { count: hits.length, texts: hits.slice(0, 8).map(h => h.text.slice(0, 120)), patterns: [...new Set(hits.flatMap(h => h.how))] } }, el);
+    }
+  }
+
+  // ---- Faint icons: under 3:1 against their real background (WCAG 1.4.11, non-text contrast) --------
+  // Icons inside a control, or sitting next to a short label. The color comes from the SVG's stroke or
+  // fill (or the icon font's color) with every opacity on the way multiplied in. An icon with several
+  // paints is judged by its strongest one. Disabled controls are exempt, and an icon over a picture
+  // or a gradient is skipped because its background cannot be measured.
+  {
+    const MIN = 3;
+    const CONTROL = 'button, a[href], [role=button], [role=tab], [role=menuitem], [role=link], [role=switch], [role=option], summary, label';
+    const ICON_FONT = /(^|[\s_-])(icon|icons|fa|fas|far|fal|fab|bi|ri|ti|mdi|glyphicon|material-icons|lucide|feather|ph|bx|bxs|ion)([\s_-]|$)|material-symbols/i;
+    const fade = (from, to) => { let o = 1; for (let x = from; x && x !== to; x = x.parentElement) o *= Number(getComputedStyle(x).opacity); return o; };
+    const faint = [];
+    const judge = (icon, paints) => {
+      const r = icon.getBoundingClientRect();
+      if (r.width < 8 || r.height < 8 || r.width > 40 || r.height > 40 || !inScope(icon) || !shown(icon)) return;
+      const control = icon.closest(CONTROL);
+      const host = control || icon.parentElement;
+      if (!host) return;
+      if (!control && !(text(host).length > 0 && text(host).length <= 40)) return; // decoration, not a control or a label's icon
+      if (control && (control.disabled || control.getAttribute('aria-disabled') === 'true' || control.closest('[aria-disabled="true"], fieldset[disabled]'))) return;
+      const bg = backdrop(icon);
+      if (!bg) return;
+      const outer = fade(icon.parentElement, null);
+      if (outer < 0.05) return;
+      const colors = paints();
+      if (!colors || !colors.length) return;
+      const best = Math.max(...colors.map(c => contrast(over({ ...c, a: Math.min(1, c.a * outer) }, bg), bg)));
+      if (best >= MIN) return;
+      const strongest = colors.slice().sort((a, b) => contrast(over(b, bg), bg) - contrast(over(a, bg), bg))[0];
+      const name = (control && (control.getAttribute('aria-label') || control.getAttribute('title') || text(control))) || icon.getAttribute('aria-label') || (icon.querySelector && (icon.querySelector('title') || {}).textContent) || text(host) || 'an icon with no name';
+      faint.push({ icon, host, name: String(name).replace(/\s+/g, ' ').trim().slice(0, 40), ratio: Math.round(best * 100) / 100, color: hex(over({ ...strongest, a: Math.min(1, strongest.a * outer) }, bg)), background: hex(bg) });
+    };
+    for (const svg of document.querySelectorAll('svg')) {
+      if (svg.parentElement && svg.parentElement.closest('svg')) continue; // an svg inside an svg is part of the outer icon
+      judge(svg, () => {
+        const shapes = [...svg.querySelectorAll('path, circle, rect, line, polyline, polygon, ellipse, use, text')];
+        const out = [];
+        for (const sh of shapes.length ? shapes : [svg]) {
+          const cs = getComputedStyle(sh);
+          if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+          const own = sh === svg ? Number(cs.opacity) : fade(sh, svg.parentElement);
+          if (cs.fill && cs.fill !== 'none') { const c = rgba(cs.fill); if (!c) return null; if (c.a > 0) out.push({ ...c, a: c.a * own * Number(cs.fillOpacity || 1) }); }
+          if (cs.stroke && cs.stroke !== 'none' && parseFloat(cs.strokeWidth) > 0) { const c = rgba(cs.stroke); if (!c) return null; if (c.a > 0) out.push({ ...c, a: c.a * own * Number(cs.strokeOpacity || 1) }); }
+        }
+        return out.filter(c => c.a > 0.01);
+      });
+    }
+    for (const el of document.querySelectorAll('i, span')) {
+      if (el.children.length || !ICON_FONT.test(typeof el.className === 'string' ? el.className : '')) continue;
+      const glyph = getComputedStyle(el, '::before').content;
+      if (!(el.textContent || '').trim() && (!glyph || glyph === 'none' || glyph === 'normal')) continue;
+      judge(el, () => { const c = rgba(getComputedStyle(el).color); return c ? [{ ...c, a: c.a * Number(getComputedStyle(el).opacity) }] : null; });
+    }
+    if (faint.length) {
+      faint.sort((a, b) => a.ratio - b.ratio);
+      const names = [...new Set(faint.map(f => f.name))];
+      const first = faint[0];
+      const crop = first.host.getBoundingClientRect().height <= 120 ? first.host : first.icon.parentElement;
+      add({ kind: 'faint-icon', group: 'faint-icon', what: `${faint.length === 1 ? 'An icon is' : `${faint.length} icons are`} hard to see: contrast ${first.ratio.toFixed(1)}:1 against the background (icons need 3:1). ${names.length === 1 ? `It is "${names[0]}"` : `For example ${names.slice(0, 3).map(n => `"${n}"`).join(', ')}`}`, detail: { count: faint.length, lowest: first.ratio, icons: faint.slice(0, 8).map(f => ({ name: f.name, contrast: f.ratio, color: f.color, background: f.background })) } }, crop);
+    }
+  }
+
+  // ---- Overflowing its box: a chip, pill, badge or button that sticks out of its card ---------------
+  // More than 2px outside the nearest boxed container (a border, a shadow or its own background), with
+  // nothing clipping it. Not flagged: menus, tooltips and pop-overs, and anything placed out of the
+  // flow on purpose (absolute, fixed or sticky: a corner badge, a ribbon).
+  {
+    const OUT = 2;
+    const POPUP = '[role=menu], [role=tooltip], [role=listbox], [popover], dialog, [class*=tooltip i], [class*=popover i], [class*=dropdown i]';
+    const cands = new Set([...pills, ...document.querySelectorAll('button, [role=button], a[class*=btn i], a[class*=button i], [class*=chip i], [class*=badge i], [class*=pill i]')]);
+    const boxed = el => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 100 || r.height < 40) return false;
+      const cs = getComputedStyle(el);
+      const sides = ['Top', 'Right', 'Bottom', 'Left'].filter(sd => parseFloat(cs[`border${sd}Width`]) > 0 && cs[`border${sd}Style`] !== 'none' && ((rgba(cs[`border${sd}Color`]) || { a: 0 }).a > 0.05)).length;
+      if (sides >= 3 || (cs.boxShadow && cs.boxShadow !== 'none')) return true;
+      const own = rgba(cs.backgroundColor), behind = backdrop(el);
+      if (!own || own.a < 0.05 || !behind) return false;
+      const seen = over(own, behind);
+      return Math.abs(seen.r - behind.r) + Math.abs(seen.g - behind.g) + Math.abs(seen.b - behind.b) > 12;
+    };
+    const hits = new Map();
+    for (const c of cands) {
+      if (!inScope(c) || !shown(c) || c.closest(POPUP) || !text(c)) continue;
+      let r = c.getBoundingClientRect();
+      if (r.width < 12 || r.height < 10) continue;
+      r = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+      let box = null, floats = false;
+      for (let x = c; x && x !== document.body && x !== document.documentElement; x = x.parentElement) {
+        const cs = getComputedStyle(x);
+        if (x !== c && boxed(x) && !x.matches('button, [role=button], a')) { box = x; break; }
+        if (cs.position === 'absolute' || cs.position === 'fixed' || cs.position === 'sticky' || cs.float !== 'none' && x === c) { floats = true; break; }
+        if (x !== c && (cs.overflowX !== 'visible' || cs.overflowY !== 'visible')) {
+          // A clipping box between the chip and its card hides what sticks out: only the visible part counts.
+          const k = x.getBoundingClientRect();
+          r = { left: Math.max(r.left, k.left), right: Math.min(r.right, k.right), top: Math.max(r.top, k.top), bottom: Math.min(r.bottom, k.bottom) };
+        }
+      }
+      if (!box || floats || r.right - r.left < 4 || r.bottom - r.top < 4) continue;
+      // Past the edge of the screen (a table wider than a phone): the clipped-text check reports that.
+      if (r.right > document.documentElement.clientWidth + OUT || r.left < -OUT) continue;
+      const boxCs = getComputedStyle(box);
+      if (boxCs.overflowX !== 'visible' || boxCs.overflowY !== 'visible') continue; // the card clips it: clipped-text reports that
+      const b = box.getBoundingClientRect();
+      const out = Math.max(r.right - b.right, b.left - r.left, r.bottom - b.bottom, b.top - r.top);
+      if (out <= OUT) continue;
+      const have = hits.get(box);
+      if (!have || out > have.out) hits.set(box, { el: c, box, out: Math.round(out), text: text(c).slice(0, 40), n: (have ? have.n : 0) + 1 });
+      else have.n++;
+    }
+    if (hits.size) {
+      const all = [...hits.values()].sort((a, b) => b.out - a.out), h = all[0];
+      const total = all.reduce((a, x) => a + x.n, 0);
+      const word = h.el.matches('button, [role=button], a') ? 'button' : 'chip';
+      add({ kind: 'overflow-box', group: 'overflow-box', what: `A ${word} sticks out of its box by ${h.out}px: "${h.text}"${total > 1 ? ` (and ${total - 1} more like it)` : ''}`, detail: { count: total, out_px: h.out, items: all.slice(0, 8).map(x => ({ text: x.text, out_px: x.out, in: describe(x.box) })) }, crop: pageBox([h.box.getBoundingClientRect(), h.el.getBoundingClientRect()], 12) }, h.box);
+    }
+  }
+
+  // ---- Duplicates on one screen ----------------------------------------------------------------------
+  // (a) The same block of text, 40 characters or more, shown in two different sections. Repeated items
+  //     (cards, rows, messages) may share text, in one list or across lists: that is data, not a duplicate.
+  // (b) The same control twice in the navigation: the same name in two navigations ("Calendar" in the
+  //     side panel and as a tab), or two navigations with a link to the same place under other words.
+  //     Footers, breadcrumbs, logos and Home links are normal repeats and are not flagged.
+  {
+    const NOT_TEXT = 'script, style, noscript, template, code, pre, textarea, select, option, [aria-hidden="true"], [role=tooltip]';
+    const SECTION = 'section, article, aside, nav, header, footer, li, tr, [role=region], [role=tabpanel], [role=dialog], [role=complementary], [class*=card i], [class*=panel i], [class*=summary i], [class*=banner i]';
+    const byText = new Map();
+    for (const el of document.querySelectorAll('p, li, blockquote, dd, figcaption, td, div, span, h1, h2, h3, h4, h5, h6')) {
+      if (el.closest(NOT_TEXT) || !inScope(el)) continue;
+      if (![...el.children].every(c => getComputedStyle(c).display.startsWith('inline') || !text(c))) continue;
+      const t = text(el);
+      if (t.length < 40 || t.length > 600 || !shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 10) continue;
+      const key = t.toLowerCase();
+      const list = byText.get(key) || [];
+      if (list.some(x => x.contains(el) || el.contains(x))) continue;
+      list.push(el); byText.set(key, list);
+    }
+    const sectionOf = el => el.closest(SECTION) || el.parentElement;
+    const repeats = (a, b) => a === b || (a.parentElement === b.parentElement && a.tagName === b.tagName);
+    // One of several like items (a card in a grid, a row in a list): its text is data, and two items
+    // may well say the same thing, in the same list or in two lists.
+    const isItem = el => !!el.parentElement && [...el.parentElement.children].some(x => x !== el && x.tagName === el.tagName && sig(x) === sig(el));
+    const dupText = [];
+    for (const [, els] of byText) {
+      if (els.length < 2) continue;
+      for (let i = 1; i < els.length; i++) {
+        const a = sectionOf(els[0]), b = sectionOf(els[i]);
+        if (repeats(a, b) || a.contains(b) || b.contains(a) || (isItem(a) && isItem(b))) continue;
+        dupText.push({ a: els[0], b: els[i], text: text(els[0]), places: [describe(a).slice(0, 60), describe(b).slice(0, 60)] });
+        break;
+      }
+    }
+    if (dupText.length) {
+      const d = dupText[0];
+      const box = pageBox([d.a.getBoundingClientRect(), d.b.getBoundingClientRect()], 12);
+      add({ kind: 'duplicate-on-screen', group: 'duplicate-text', what: `The same text shows twice on this screen: "${d.text.slice(0, 80)}"${dupText.length > 1 ? ` (and ${dupText.length - 1} more repeated block${dupText.length > 2 ? 's' : ''})` : ''}`, detail: { how: 'text', count: dupText.length, blocks: dupText.slice(0, 5).map(x => ({ text: x.text.slice(0, 160), places: x.places })) }, ...(box.height < 1200 ? { crop: box } : {}) }, d.b);
+    }
+
+    const NAVS = 'nav, [role=navigation], [role=tablist], [role=menubar], [role=toolbar], aside, header, [class*=sidebar i], [class*=navbar i], [class*=topbar i], [class*=tabs i], [class*=tablist i]';
+    const NORMAL = 'footer, [role=contentinfo], [aria-label*=breadcrumb i], [class*=breadcrumb i], [aria-label*=pagination i], [class*=pagination i], [class*=pager i], [role=menu], [role=dialog], dialog';
+    const GENERIC = /^(home|back|close|menu|more|next|previous|prev|open|cancel|ok|skip|help|search)$/i;
+    const placeOf = nav => {
+      const label = nav.getAttribute('aria-label');
+      if (nav.matches('[role=tablist], [class*=tabs i], [class*=tablist i]')) return label ? `the "${label}" tabs` : 'the tabs';
+      if (nav.matches('aside, [class*=sidebar i]') || nav.closest('aside, [class*=sidebar i]')) return label ? `the "${label}" side navigation` : 'the side panel';
+      if (nav.matches('header, [class*=topbar i], [class*=navbar i]') || nav.closest('header, [class*=topbar i], [class*=navbar i]')) return label ? `the "${label}" navigation in the top bar` : 'the top bar';
+      return label ? `the "${label}" navigation` : 'the navigation';
+    };
+    const home = u => { try { const x = new URL(u, location.href); return /^\/?(index\.html?)?$/.test(x.pathname.replace(/\/+$/, '')) && /^#?\/?$/.test(x.hash) && !x.search; } catch { return true; } };
+    const controls = [];
+    for (const el of document.querySelectorAll('a[href], button, [role=tab], [role=menuitem], [role=link], [role=button]')) {
+      const nav = el.closest(NAVS);
+      if (!nav || el.closest(NORMAL) || !inScope(el) || !shown(el)) continue;
+      if (el.parentElement && el.parentElement.closest('a[href], button, [role=tab], [role=button]')) continue;
+      const words = text(el).replace(/\b\d+\b/g, '').replace(/\s+/g, ' ').trim();
+      const name = (/[\p{L}]/u.test(words) ? words : (el.getAttribute('aria-label') || el.getAttribute('title') || '')).trim();
+      if (/logo/i.test((typeof el.className === 'string' ? el.className : '') + ' ' + (el.getAttribute('aria-label') || '')) || (!words && el.querySelector('img') && el.matches('a[href]') && home(el.href))) continue;
+      const href = el.matches('a[href]') ? el.getAttribute('href') : null;
+      let target = null;
+      if (href && !/^(#|javascript:|mailto:|tel:)$|^(javascript:|mailto:|tel:)/i.test(href) && !home(el.href)) { try { const x = new URL(el.href); target = x.origin + x.pathname.replace(/\/+$/, '') + x.search + x.hash; } catch {} }
+      controls.push({ el, nav, name, key: name.toLowerCase(), target });
+    }
+    const dupCtl = [], used = new Set();
+    const pair = (a, b, how) => { if (used.has(a.el) || used.has(b.el)) return; used.add(a.el); used.add(b.el); dupCtl.push({ a, b, how }); };
+    for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+      const a = controls[i], b = controls[j];
+      const named = a.key && a.key === b.key && a.key.length >= 3 && a.key.split(' ').length <= 3 && !GENERIC.test(a.key);
+      // The same name: in two navigations, or twice in one (two entries of one list only when they also
+      // go to the same place: two chats may share a title). The same place under two different names:
+      // only across two navigations.
+      const sameItemList = a.nav === b.nav && repeats(a.el.closest('li') || a.el, b.el.closest('li') || b.el);
+      if (named && (!sameItemList || (a.target && a.target === b.target))) pair(a, b, 'name');
+      else if (!named && a.key && b.key && a.target && a.target === b.target && a.nav !== b.nav && !a.nav.contains(b.nav) && !b.nav.contains(a.nav)) pair(a, b, 'target');
+    }
+    if (dupCtl.length) {
+      const d = dupCtl[0];
+      const where = [placeOf(d.a.nav), placeOf(d.b.nav)];
+      const said = d.how === 'name' ? `"${d.a.name}" is on this screen twice: in ${where[0]} and in ${where[1] === where[0] ? 'the same place again' : where[1]}`
+        : `"${d.a.name || 'An unnamed control'}" in ${where[0]} and "${d.b.name || 'an unnamed control'}" in ${where[1]} go to the same place (${d.a.target.replace(/^https?:\/\/[^/]+/, '')})`;
+      const box = pageBox([d.a.el.getBoundingClientRect(), d.b.el.getBoundingClientRect()], 16);
+      add({ kind: 'duplicate-on-screen', group: 'duplicate-control', what: `${said}${dupCtl.length > 1 ? ` (and ${dupCtl.length - 1} more repeated control${dupCtl.length > 2 ? 's' : ''})` : ''}`, detail: { how: 'control', count: dupCtl.length, controls: dupCtl.slice(0, 5).map(x => ({ name: x.a.name, other_name: x.b.name, same: x.how, places: [placeOf(x.a.nav), placeOf(x.b.nav)], target: x.a.target || x.b.target || null })) }, ...(box.height < 1200 ? { crop: box } : {}) }, d.b.el);
+    }
+  }
+
+  // ---- Stacked control rows: could these be one row? -------------------------------------------------
+  // 2 rows of controls (search, sort, filters, tabs, view toggles) sitting directly above the same
+  // list, each using less than half of the list's width. A judgment lead, not a rule.
+  {
+    const CTRL = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]), select, [role=combobox], [role=searchbox], [role=tablist], [role=radiogroup], button, [role=button], [role=tab]';
+    const AWAY = 'nav, header, aside, footer, [role=dialog], dialog, [role=menu], [role=navigation]';
+    const nameOf = el => (el.getAttribute('aria-label') || el.getAttribute('placeholder') || text(el) || el.getAttribute('title') || el.getAttribute('name') || el.tagName.toLowerCase()).replace(/\s+/g, ' ').trim().slice(0, 24);
+    const sorts = el => el.matches('input, select, [role=combobox], [role=searchbox], [role=tablist], [role=tab], [role=radiogroup], [aria-pressed], [aria-haspopup]') || /\b(sort|filter|view|grid|list|search)\b/i.test(nameOf(el));
+    // How wide a control really is: a tab strip is as wide as its tabs, not as its container.
+    const widthOf = el => { if (!el.matches('[role=tablist], [role=radiogroup]')) return el.getBoundingClientRect().width; const kids = [...el.children].filter(vis).map(k => k.getBoundingClientRect()); return kids.length ? Math.max(...kids.map(k => k.right)) - Math.min(...kids.map(k => k.left)) : el.getBoundingClientRect().width; };
+    const lists = [...new Set([...groups.map(g => g.parent), ...[...document.querySelectorAll('table, [role=table], [role=grid], ul, ol, [role=list]')].filter(l => [...l.children].filter(vis).length >= 3 || l.matches('table, [role=table], [role=grid]'))])]
+      .filter(l => inScope(l) && shown(l) && !l.closest(AWAY) && l.getBoundingClientRect().width >= 300 && l.getBoundingClientRect().height >= 80);
+    const all = [...document.querySelectorAll(CTRL)].filter(c => vis(c) && inScope(c) && !c.closest(AWAY) && !(c.parentElement && c.parentElement.closest(CTRL)));
+    let found = null;
+    for (const list of lists) {
+      const L = list.getBoundingClientRect();
+      const above = all.filter(c => !list.contains(c)).map(c => ({ c, r: c.getBoundingClientRect() }))
+        .filter(x => x.r.bottom <= L.top + 4 && L.top - x.r.bottom <= 220 && x.r.left < L.right && x.r.right > L.left && x.r.height <= 72);
+      if (above.length < 2) continue;
+      const rows = [];
+      for (const x of above.sort((a, b) => a.r.top - b.r.top)) {
+        const mid = (x.r.top + x.r.bottom) / 2;
+        const row = rows.find(w => mid > w.top && mid < w.bottom);
+        if (row) { row.els.push(x); row.top = Math.min(row.top, x.r.top); row.bottom = Math.max(row.bottom, x.r.bottom); }
+        else rows.push({ top: x.r.top, bottom: x.r.bottom, els: [x] });
+      }
+      if (rows.length < 2) continue;
+      rows.sort((a, b) => b.bottom - a.bottom);
+      const [low, high] = rows;
+      if (L.top - low.bottom > 64 || low.top - high.bottom > 32 || low.top - high.bottom < -2) continue;
+      if (![low, high].every(w => w.els.some(x => sorts(x.c)))) continue;
+      const share = w => w.els.reduce((a, x) => a + widthOf(x.c), 0) / L.width;
+      if (share(low) >= 0.5 || share(high) >= 0.5) continue;
+      // A heading between the rows means they belong to two different things.
+      const between = [...document.querySelectorAll('h1, h2, h3, h4, h5, h6')].some(h => { const r = h.getBoundingClientRect(); return vis(h) && r.top >= high.bottom - 2 && r.bottom <= L.top + 2 && r.left < L.right && r.right > L.left; });
+      if (between) continue;
+      found = { list, L, low, high, share };
+      break;
+    }
+    if (found) {
+      const { L, low, high, share } = found;
+      const names = w => w.els.sort((a, b) => a.r.left - b.r.left).map(x => nameOf(x.c)).filter(Boolean).slice(0, 4).join(', ');
+      const pct = w => Math.round(share(w) * 100);
+      const rects = [...high.els, ...low.els].map(x => x.r);
+      add({ kind: 'stacked-controls', group: 'stacked-controls', what: `Two rows of controls sit above the same list (${names(high)} / ${names(low)}), and each uses less than half the width (${pct(high)}% and ${pct(low)}%). Could these be one row?`, detail: { rows: [{ controls: names(high), width_share: pct(high) }, { controls: names(low), width_share: pct(low) }], list_width: Math.round(L.width) }, crop: pageBox([...rects, { left: L.left, right: L.right, top: Math.min(...rects.map(r => r.top)), bottom: L.top + 60 }], 8) }, found.list);
+    }
+  }
 
   // Layout shift: content that jumps after it was first shown (a banner that arrives late, an image
   // with no size, a font swap). The browser reports each jump; over 0.1 in total is easy to notice.

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Files</title>
+<link rel="stylesheet" href="base.css">
+<style>
+.bar { display: flex; gap: 8px; margin-bottom: 16px; }
+.icon-btn { width: 40px; height: 40px; border: 1px solid #777; border-radius: 8px; background: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+.light { color: #d6d6d6; }
+.dark { color: #333; }
+</style></head>
+<body>
+<main>
+  <h1>Files</h1>
+  <div class="bar">
+    <button type="button" class="icon-btn light" aria-label="Sort files"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h5"/></svg></button>
+    <button type="button" class="icon-btn light" aria-label="Filter files"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg></button>
+    <button type="button" class="icon-btn light" aria-label="Show as grid"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg></button>
+    <button type="button" class="icon-btn dark" aria-label="Upload a file"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+  </div>
+  <div class="card"><h2>Budget plan</h2><p>Updated on Monday.</p></div>
+  <div class="card"><h2>Team notes</h2><p>Updated on Tuesday.</p></div>
+</main>
+</body>
+</html>

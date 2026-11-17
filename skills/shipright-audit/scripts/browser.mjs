@@ -379,6 +379,21 @@ export function analyzeScript(opts = {}) {
   return `(() => { ${analyzeSrc}\n return SHIPRIGHT_ANALYZE(${JSON.stringify(opts)}); })()`;
 }
 
+// The crop for a finding: its own box when the check gave one (a problem wider than one element, like
+// a chip outside its card), else the element it marked. Returns true when a file was written.
+export async function shootFinding(page, f, file) {
+  if (f.crop) {
+    const size = await page.evaluate(() => ({ w: Math.max(document.documentElement.scrollWidth, innerWidth), h: Math.max(document.documentElement.scrollHeight, innerHeight) })).catch(() => null);
+    if (size) {
+      const x = Math.max(0, Math.min(f.crop.x, size.w - 2)), y = Math.max(0, Math.min(f.crop.y, size.h - 2));
+      const clip = { x, y, width: Math.max(2, Math.min(f.crop.width, size.w - x)), height: Math.max(2, Math.min(f.crop.height, size.h - y)) };
+      if (await page.screenshot({ path: file, fullPage: true, clip }).then(() => true).catch(() => false)) return true;
+    }
+  }
+  if (!f.mark) return false;
+  return page.locator(`[data-srv="${f.mark}"]`).first().screenshot({ path: file, timeout: 5000 }).then(() => true).catch(() => false);
+}
+
 // One lead per problem: the same check with the same words (numbers aside) on several pages or widths
 // is one lead that lists them all. A lead seen at only one of the widths says so.
 export function mergeLeads(findings, widths, local = u => u) {
