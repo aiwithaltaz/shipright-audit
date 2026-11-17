@@ -28,9 +28,12 @@
 // (a dialog, menu, panel, new page, file picker, a change on the page, or nothing), console and network
 // errors caused by the click, and a screenshot when something opened. Then it puts the page back.
 // Safety on live apps (http/https): it only clicks controls that open something (menus, tabs, pop-ups) or
-// whose name says so (open, menu, more, settings, filter, model, attach, add, new, create, search...),
+// whose name says so (open, menu, more, settings, filter, model, attach, search...),
 // never risky words (delete, send, publish, generate, save, pay, like, pin, regenerate... see DANGER in
 // browser.mjs) and never form submit buttons. Everything else is listed as "not clicked" for you to judge.
+// A button named create, add or new is clicked only when it shows that it opens something
+// (aria-haspopup, aria-expanded, or it is a link to a new page) or the owner allowed it (--allow, or
+// "allow_controls" in use-limits.json). Otherwise it is held: "could create an item".
 // --allow names extra controls the owner said yes to. Icon-only controls are always hovered, never
 // clicked unless they have a safe name. File pickers and browser dialogs are cancelled.
 // Switches (role=switch, checkboxes, aria-pressed buttons) are never flipped, unless you pass --use.
@@ -59,11 +62,13 @@ const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
 const { session, profile, landed } = signInFlags(args, 'explore');
 const MAX = Number(flag('--max') || 40);
-const allow = (flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const ownerLimits = useLimits(args, outDir, 'explore');
+// Controls the owner said may be clicked: --allow, and "allow_controls" in use-limits.json.
+const allow = [...(flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean), ...(ownerLimits ? ownerLimits.allow_controls : [])];
 const widths = widthsFlag(args);
 const USE = args.includes('--use');
 // What the owner ruled out when they said yes with limits. Only read with --use.
-const limits = USE ? useLimits(args, outDir, 'explore') : null;
+const limits = USE ? ownerLimits : null;
 const MAX_FLIPS = 12; // per page
 const OPENER = /\b(open|menu|more|options|settings|preferences|filter|sort|view|show|details|info|help|select|choose|picker|model|attach|tools|add|new|create|expand|collapse|sidebar|panel|search|budget|usage|context|account|profile|switch|tab|history|notifications?|microphone|voice|dictat\w*|speech|help)\b/i;
 const CONTROLS = 'button, [role=button], [role=tab], summary, [aria-haspopup]:not(a)';
@@ -291,12 +296,18 @@ try {
           const iconOnly = !wordy;
           const submit = (el.type === 'submit' && !!el.closest('form')) || false;
           const opens = el.hasAttribute('aria-haspopup') || el.hasAttribute('aria-expanded') || el.getAttribute('role') === 'tab' || el.tagName === 'SUMMARY';
+          // "Create", "Add" and "New" may open a form, or may make the item at once. On a live app only
+          // the ones that show they open something are safe: a pop-up, or a link to a new page.
+          const makes = /\b(create|add|new)\b/i.test(name);
+          const link = el.closest('a[href]');
+          const showsItOpens = (el.hasAttribute('aria-haspopup') && el.getAttribute('aria-haspopup') !== 'false') || el.hasAttribute('aria-expanded') || el.tagName === 'SUMMARY' || (!!link && !/^(#|javascript:|)$/i.test((link.getAttribute('href') || '').trim()));
           const allowed = allow.some(a => name.toLowerCase().includes(a));
           const toggle = el.matches('[role=switch], [role=checkbox], [role=menuitemcheckbox], [aria-pressed], [aria-checked]');
           let click = true, why = '';
           if (toggle) { click = false; why = 'a switch: flipped only with the owner\'s yes (--use)'; }
           else if (D.test(name) && !allowed) { click = false; why = 'risky word'; }
           else if (submit && !allowed) { click = false; why = 'submits a form'; }
+          else if (isRemote && makes && !allowed && !showsItOpens) { click = false; why = 'could create an item'; }
           else if (isRemote && !allowed && !opens && !O.test(name)) { click = false; why = name ? 'could change data' : 'no name, unknown effect'; }
           const r = el.getBoundingClientRect();
           out.push({ i, name: name || '(no name)', iconOnly, hasName: !!name, click, why, y: Math.round(r.top) });

@@ -250,6 +250,26 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
       check(keep + table, audit).some(e => e.includes('Keeps K2: this Keep is about the actions on an item')) && check(keep.replace('| Each card offers the right actions |', '| The Ready card offers the right actions (LC03) |') + table, audit).length === 0
       && check(keep.replace('| Each card offers the right actions |', '| Each card offers the right actions (LC01) |') + table, audit).some(e => e.includes('LC01 did not pass all 4 lifecycle questions')), 'no row cited fails, a passed row passes, a failed row fails');
   }
+
+  // Step 8. Create and Add on a live app. A plain "Create" that would add a list item is held. An "Add"
+  // with aria-haspopup is opened, and so is a "New folder" link to a new page. With the owner's
+  // allowed list, "Create" is clicked.
+  if (want('create') && hasPw) {
+    const app = await serveFixture('tests/fixtures/create-app/index.html');
+    const audit = tmp('create');
+    await runNode([S + 'explore.mjs', app.url, '--widths', '1280', '--out', join(audit, 'explore')]);
+    const ex = readJson(join(audit, 'explore', 'explore.json'), { controls: [] });
+    const res = n => (ex.controls.find(c => c.control === n) || {}).result || 'not found';
+    ok('on a live app a plain "Create" is held, and an "Add" with aria-haspopup is opened',
+      res('Create') === 'not clicked: could create an item' && !app.hits.includes('create') && /^opened menu/.test(res('Add')) && app.hits.includes('open-menu') && /^went to .*#\/new-folder$/.test(res('New folder')),
+      `Create: ${res('Create')} · Add: ${res('Add')} · New folder: ${res('New folder')}`);
+    app.hits.length = 0;
+    writeFileSync(join(audit, 'use-limits.json'), JSON.stringify({ answer: 'yes with limits', owner_words: 'Yes, and you may make one test folder.', allow_controls: ['Create'] }));
+    await runNode([S + 'explore.mjs', app.url, '--widths', '1280', '--out', join(audit, 'explore')]);
+    app.stop();
+    const ex2 = readJson(join(audit, 'explore', 'explore.json'), { controls: [] });
+    ok('"Create" is clicked once the owner\'s allowed list names it', app.hits.filter(h => h === 'create').length === 1 && /^changed the page/.test((ex2.controls.find(c => c.control === 'Create') || {}).result || ''), `${app.hits.filter(h => h === 'create').length} click(s) reached the app`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

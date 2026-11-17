@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Folders</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; }
+.bar { display: flex; gap: 8px; margin-bottom: 16px; position: relative; }
+.bar button, .bar a { padding: 8px 14px; border: 1px solid #777; border-radius: 8px; background: #fff; font: inherit; color: #1c1c1c; text-decoration: none; }
+.menu { position: absolute; top: 44px; left: 90px; width: 200px; background: #fff; border: 1px solid #bbb; border-radius: 10px; padding: 8px; }
+.menu [role=menuitem] { display: block; width: 100%; border: 0; text-align: left; }
+li { padding: 8px 0; }
+</style></head>
+<body>
+<main>
+  <h1 id="title">Folders</h1>
+  <div class="bar">
+    <button type="button" id="create">Create</button>
+    <button type="button" id="add" aria-haspopup="menu" aria-expanded="false">Add</button>
+    <a role="button" href="#/new-folder">New folder</a>
+    <div class="menu" role="menu" aria-label="Add to this folder" id="menu" hidden><button type="button" role="menuitem">A note</button><button type="button" role="menuitem">A file</button></div>
+  </div>
+  <ul id="list"><li>Invoices</li><li>Photos</li></ul>
+</main>
+<script>
+  const tell = what => fetch('/api/' + what, { method: 'POST' }).catch(() => {});
+  const menu = document.getElementById('menu'), add = document.getElementById('add');
+  document.getElementById('create').onclick = () => { tell('create'); const li = document.createElement('li'); li.textContent = 'Untitled folder, made just now'; document.getElementById('list').appendChild(li); };
+  add.onclick = () => { tell('open-menu'); menu.hidden = !menu.hidden; add.setAttribute('aria-expanded', String(!menu.hidden)); };
+  addEventListener('keydown', e => { if (e.key === 'Escape') { menu.hidden = true; add.setAttribute('aria-expanded', 'false'); } });
+  const route = () => { document.getElementById('title').textContent = location.hash === '#/new-folder' ? 'Name your new folder' : 'Folders'; };
+  addEventListener('hashchange', route); route();
+</script>
+</body>
+</html>
