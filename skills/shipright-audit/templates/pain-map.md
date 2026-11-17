@@ -1,7 +1,7 @@
 # Pain map: <app name>
 
 Audited: <date> · Screens in scope: <n> · Tasks walked: <n> · Controls opened: <n of m> · Reviewers: <n> · Method: <crawl / by hand / screenshots> · Widths seen: <390, 1280, or the width you actually saw> · Data: <realistic / sparse / empty>
-Phone coverage: <x of y> in-scope screens · Used as a user: <yes (n actions) / no> · Competitor research: <live, checked <date> / from knowledge, no web tool>
+Phone coverage: <x of y> in-scope screens · Used as a user: <yes (n actions) / yes with limits: "owner's words" (n actions) / no / not answered (unattended)> · Competitor research: <live, checked <date> / from knowledge, no web tool>
 Scope: <the core tasks audited>
 Out of scope: <what was not audited>
 Context used: <users, business goal, analytics, owner rules read (owner-rules.md), files skipped for fairness: or "none given">
@@ -91,6 +91,7 @@ One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##), `sampl
 
 - <what could not be checked, and why>
 - <if the app was not used as a user: How features behave when used (switches, sending, results)>
+- <on yes with limits: each thing the owner's limits held>
 
 ## Left behind
 

@@ -33,13 +33,16 @@
 // "toggle-side-effect" lead. It never flips switches on settings or account pages, or ones with risky
 // or account-wide names (notifications, billing, privacy, sharing...), or ones that change one of the user's
 // items (a checkbox on every row of a list, a bookmark): those need their own yes.
+// The owner's limits: when the owner said "yes, but ...", the audit writes <audit>/use-limits.json (the
+// format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
+// every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths', '--limits'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
 if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--widths 1280,390] [--profile dir] [--session file] [--out dir] [--max 40] [--allow "Label,Label"]'); process.exit(2); }
@@ -50,6 +53,8 @@ const MAX = Number(flag('--max') || 40);
 const allow = (flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 const widths = widthsFlag(args);
 const USE = args.includes('--use');
+// What the owner ruled out when they said yes with limits. Only read with --use.
+const limits = USE ? useLimits(args, outDir, 'explore') : null;
 const MAX_FLIPS = 12; // per page
 const OPENER = /\b(open|menu|more|options|settings|preferences|filter|sort|view|show|details|info|help|select|choose|picker|model|attach|tools|add|new|create|expand|collapse|sidebar|panel|search|budget|usage|context|account|profile|switch|tab|history|notifications?|microphone|voice|dictat\w*|speech|help)\b/i;
 const CONTROLS = 'button, [role=button], [role=tab], summary, [aria-haspopup]:not(a)';
@@ -152,7 +157,9 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
   for (const t of list) {
     const row = { page: local(url), width, opener: opener || null, switch: t.name, before: t.state, after: null, final: null, restored: null, flipped: false, added: [], removed: [], url_changed: false, errors: [], shots: {}, skipped: null };
     toggles.push(row);
-    if (DANGER.test(t.name)) row.skipped = 'risky word';
+    const ruledOut = heldBy(limits, t.name);
+    if (ruledOut) { row.skipped = `held: the owner ruled this out ("${ruledOut.action}")`; row.held_by = ruledOut.action; }
+    else if (DANGER.test(t.name)) row.skipped = 'risky word';
     else if (ACCOUNT_NAME.test(t.name)) row.skipped = 'an account-wide setting: needs its own yes';
     else if (t.perItem || ITEM_ACTION.test(t.name)) row.skipped = 'changes one of the user\'s items, not a setting: needs its own yes';
     else if (ACCOUNT_PLACE.test(where) || ACCOUNT_PLACE.test(t.place) || ACCOUNT_PLACE.test(opener || '')) row.skipped = 'on a settings or account screen: needs its own yes';
@@ -379,7 +386,9 @@ for (const g of sideEffects.values()) {
 // the first width a control is seen, so they do not say "at 1280 only".
 const merged = mergeLeads(found.map((f, i) => ({ ...f, id: `E${i}` })), widths, local);
 merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
-const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch) };
+const heldSwitches = toggles.filter(t => t.held_by);
+const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch),
+  limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action), held_switches: heldSwitches.map(t => ({ switch: t.switch, page: t.page, held_by: t.held_by })) } : null };
 const unique = [...explored.values()];
 const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
@@ -394,10 +403,11 @@ const md = ['# Explore: every safe control', '',
   ...(merged.length ? merged.map(l => `| ${l.id} | ${l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.widths.join(', ')} | ${l.pages.join(', ')} |`) : ['| none | | | | |']),
   ...(USE ? ['', '## Used as a user: switches flipped and turned back', '',
     `${use.switches_flipped} of ${use.switches_found} switch(es) flipped, ${use.turned_back} turned back.${use.not_turned_back.length ? ` **Not turned back: ${use.not_turned_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''} Count each flipped switch as one action in the header's "Used as a user: yes (N actions)".`, '',
+    ...(limits ? [`The owner's limits (${limits.file}): "${limits.owner_words}". Held and not flipped: ${heldSwitches.length ? [...new Set(heldSwitches.map(t => `"${t.switch}" (${t.held_by})`))].join(', ') : 'no switch matched a held action'}. Name what was held in Not verified.`, ''] : []),
     '| Page | Opened from | Switch | Was | Flipped to | Ends | What appeared away from the switch | Before | After |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : `NOT RESTORED (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
     : ['', '## Switches', '', 'Not flipped. Flipping switches needs the owner\'s yes to "use the app like a real user" (then run this again with `--use`). Until then, write in Not verified: "How features behave when used (switches, sending, results)".']),
   '', '## Controls', '', '| Page | Width | Control | Icon only | Tooltip | What happened | Errors | Screenshot |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ...rows.map(r => `| ${r.page} | ${r.width} | ${r.control.replace(/\|/g, '/')} | ${r.icon_only ? 'yes' : ''} | ${r.tooltip || (r.icon_only && r.width > 500 ? 'none' : '')} | ${(r.result || '').replace(/\|/g, '/')} | ${r.errors.join('; ').replace(/\|/g, '/')} | ${r.shot || ''} |`)];
 writeFileSync(join(outDir, 'explore.md'), md.join('\n') + '\n');
-console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped and ${use.turned_back} turned back` : ''} · ${outDir}`);
+console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped and ${use.turned_back} turned back` : ''}${limits ? `, ${heldSwitches.length} held by the owner's limits` : ''} · ${outDir}`);

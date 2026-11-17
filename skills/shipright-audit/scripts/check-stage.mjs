@@ -180,18 +180,28 @@ export function check(md, dir = null) {
   if (themes.rows.length && (themes.rows.length < 3 || themes.rows.length > 5) && nowIds.length >= 3) errors.push(`Themes: ${themes.rows.length} theme(s). Use 3 to 5.`);
 
   // Used as a user: "yes (N actions)" needs every action listed in Left behind. "no" needs the Not verified line.
-  const usedLine = header.match(/Used as a user:\s*(yes|no)\b([^\n·|]*)/i);
-  let usedYes = false, usedCount = 0;
+  // "yes with limits" also quotes the owner's words. "not answered" is only for a session nobody is
+  // watching (scheduled or headless): in a live session the audit stops and waits for the answer.
+  const usedLine = header.match(/Used as a user:\s*(yes with limits|yes|not answered|no)\b([^\n·|]*)/i);
+  let usedYes = false, usedCount = 0, usedLimits = false, usedQuote = '';
   if (header.includes('Used as a user:')) {
-    if (!usedLine) errors.push('Header "Used as a user:" must read "yes (N actions)" or "no".');
-    else if (/yes/i.test(usedLine[1])) {
+    if (!usedLine) errors.push('Header "Used as a user:" must read "yes (N actions)", "yes with limits: "<owner\'s words>" (N actions)", "no" or "not answered (unattended)".');
+    else if (/^not answered/i.test(usedLine[1])) {
+      if (!/\bunattended\b/i.test(usedLine[2])) errors.push('Header says "Used as a user: not answered". In a live session, stop and wait for the owner\'s answer: silence is not a no. Only a session nobody is watching (scheduled or headless) may go on read-only, and then the header reads "not answered (unattended)".');
+      if (!/how features behave when used/i.test(notVerifiedText)) errors.push('Used as a user: not answered. Add this line to Not verified: "How features behave when used (switches, sending, results)".');
+    } else if (/yes/i.test(usedLine[1])) {
       usedYes = true;
+      usedLimits = /limits/i.test(usedLine[1]);
       const n = usedLine[2].match(/\(\s*(\d+)\s+actions?\s*\)/i);
-      if (!n) errors.push('Header "Used as a user: yes" must give the count: "yes (N actions)".');
+      if (!n) errors.push(`Header "Used as a user: ${usedLine[1].toLowerCase()}" must give the count: "${usedLimits ? 'yes with limits: "<owner\'s words>" (N actions)' : 'yes (N actions)'}".`);
       else usedCount = Number(n[1]);
+      if (usedLimits) {
+        usedQuote = (usedLine[2].match(/["\u201c]([^"\u201d]{3,})["\u201d]/) || [])[1] || '';
+        if (!usedQuote) errors.push('Header "Used as a user: yes with limits" must quote the owner\'s words: yes with limits: "yes, but don\'t generate a video" (N actions).');
+      }
       const lbLines = sections['Left behind'] || [];
       const listed = table(lbLines).rows.length + lbLines.filter(l => /^\s*[-*]\s+\S/.test(l) && !/^\s*[-*]\s+nothing\b/i.test(l)).length;
-      if (!listed) errors.push('Used as a user: yes, but Left behind lists nothing. List every switch flipped, every test message and every test item, so the owner can delete them.');
+      if (!listed && !(usedLimits && usedCount === 0)) errors.push('Used as a user: yes, but Left behind lists nothing. List every switch flipped, every test message and every test item, so the owner can delete them.');
     } else if (!/how features behave when used/i.test(notVerifiedText)) errors.push('Used as a user: no. Add this line to Not verified: "How features behave when used (switches, sending, results)".');
   }
 
@@ -222,6 +232,15 @@ export function check(md, dir = null) {
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || []).map(l => l.id)); scriptActions += (v.used_actions || []).length; } catch {}
     }
     try { const ex = find(dir, 'explore.json'); if (ex) scriptActions += JSON.parse(readFileSync(ex, 'utf8')).use?.switches_flipped || 0; } catch {}
+    // The owner's limits: when use-limits.json holds anything back, the header says so in the owner's words.
+    const limitsFile = find(dir, 'use-limits.json');
+    if (limitsFile) {
+      let lim = null;
+      try { lim = JSON.parse(readFileSync(limitsFile, 'utf8')); } catch { errors.push('use-limits.json is not valid JSON. It holds the owner\'s limits: fix it.'); }
+      const loose = t => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      if (lim && (lim.held || []).length && usedYes && !usedLimits) errors.push(`use-limits.json holds back ${lim.held.length} action(s) the owner ruled out, but the header says "Used as a user: yes". Write: yes with limits: "<owner's words>" (N actions).`);
+      if (lim && usedLimits && usedQuote && lim.owner_words && !loose(lim.owner_words).includes(loose(usedQuote)) && !loose(usedQuote).includes(loose(lim.owner_words))) errors.push('Header "Used as a user: yes with limits" must quote the owner\'s words exactly as they stand in use-limits.json ("owner_words").');
+    }
     if (scriptActions && !usedYes) errors.push(`Header says "Used as a user: no", but the scripts flipped switches or ran owner-approved steps (${scriptActions} action(s)). Write "Used as a user: yes (${scriptActions} actions)" and list them in Left behind.`);
     else if (scriptActions && usedCount < scriptActions) errors.push(`Header says "Used as a user: yes (${usedCount} actions)", but the scripts recorded ${scriptActions}. Count every flipped switch and every owner-approved step.`);
     leads = [...new Set(leads)];
@@ -433,6 +452,22 @@ function selfTest() {
     ['a result lead from a walk must be decided', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n', d3).some(e => e.includes('W-send-1 not decided'))],
     ['a decided walk lead passes', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| W-send-1 | media | P01 |\n', d3).length === 0],
   );
+  // The use-it question is waited for: "not answered" passes only when the session was unattended. A yes
+  // with limits quotes the owner, and the header may not hide limits that use-limits.json holds.
+  const limited = listed.replace('yes (3 actions)', 'yes with limits: "yes, but leave the image tools off" (3 actions)');
+  const d5 = mkdtempSync(join(tmpdir(), 'gate-limits-'));
+  mkdirSync(join(d5, 'screens'));
+  for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d5, f), '');
+  writeFileSync(join(d5, 'use-limits.json'), JSON.stringify({ answer: 'yes with limits', owner_words: 'Yes, but leave the image tools off.', held: [{ action: 'turn on the image tools', match: ['images'] }] }));
+  cov.push(
+    ['used: "not answered" without "unattended" fails', check(good.replace('Used as a user: no', 'Used as a user: not answered')).some(e => e.includes('stop and wait for the owner'))],
+    ['used: "not answered (unattended)" passes', check(good.replace('Used as a user: no', 'Used as a user: not answered (unattended)')).length === 0],
+    ['used: "not answered (unattended)" still needs the Not verified line', check(good.replace('Used as a user: no', 'Used as a user: not answered (unattended)').replace('- How features behave when used (switches, sending, results)\n', '')).some(e => e.includes('How features behave when used'))],
+    ['used: yes with limits, quoted and counted, passes', check(limited, d5).length === 0],
+    ['used: yes with limits without the owner\'s words fails', check(listed.replace('yes (3 actions)', 'yes with limits (3 actions)')).some(e => e.includes('must quote the owner'))],
+    ['used: a plain yes fails when use-limits.json holds actions back', check(listed, d5).some(e => e.includes('holds back 1 action(s)'))],
+    ['used: yes with limits must quote the words in use-limits.json', check(limited.replace('leave the image tools off', 'do whatever you like'), d5).some(e => e.includes('exactly as they stand in use-limits.json'))],
+  );
   // Competitor research: fewer than 10 rows, no Source column and no how-it-works rows each fail. A table
   // that has them passes (the good pain map above). Without a web tool, "from knowledge" must say so.
   const conv = good.split('## Category conventions')[1].split('## Screens')[0];
@@ -467,7 +502,7 @@ function selfTest() {
     ['owner rules: no owner-rules.md, no section needed', check(good, d).filter(e => /owner/i.test(e)).length === 0],
   );
   const covFailed = cov.filter(([, pass]) => !pass).map(([name]) => name);
-  console.log(covFailed.length === 0 ? `PASS  0.7 header, research and owner-rule checks: ${cov.length} cases` : `FAIL  0.7 header, research and owner-rule checks: ${covFailed.join(', ')}`);
+  console.log(covFailed.length === 0 ? `PASS  header, research, owner-rule and use-limit checks: ${cov.length} cases` : `FAIL  header, research, owner-rule and use-limit checks: ${covFailed.join(', ')}`);
   const g = check(good), b = check(bad);
   const expect = ['Controls opened:', 'Phone coverage:', 'Used as a user:', 'has no 390 screenshot', 'Competitor research:', 'verdict must be Matches', 'Compare at least 10', 'row for T9', 'T8: score must be', 'T8: say why', 'sentence verdict', 'duplicate ID', 'no screenshot path', 'heuristic or lens', 'severity "high"', 'cause "navigation"', 'source must start', 'need a principle', 'need a test', 'Reviewers:', 'Not verified', 'joins problems', 'sentences', 'Missing: no rows', 'Left behind'];
   const missing = expect.filter(e => !b.some(x => x.includes(e)));

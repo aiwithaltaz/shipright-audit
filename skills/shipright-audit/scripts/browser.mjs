@@ -90,6 +90,50 @@ export function normUrl(u) {
 // Also words that change data with one click: likes, pins, stars, feedback, regenerate, share.
 export const DANGER = /delete|remove|publish|\bpost\b|post now|send|\bpay|sign ?out|log ?out|archive|connect|generate|schedule|invite|save|submit|approve|purchase|\bbuy\b|upgrade|cancel (plan|subscription)|regenerate|retry|resend|\blike\b|dislike|thumb|feedback|\bvote|\bpin\b|unpin|\bstar\b|favou?rite|follow|subscribe|\bshare\b|duplicate|rename|\bfork\b|branch|record|dismiss|accept|decline/i;
 
+// ---- The owner's limits on "use it like a real user" --------------------------------------------
+// When the owner answers "yes, but ..." the audit writes <audit>/use-limits.json, in the owner's words:
+//   { "answer": "yes with limits", "owner_words": "yes, but don't generate a video",
+//     "allowed": ["flip switches and turn them back", "send up to 3 short test messages"],
+//     "held": [{ "action": "generate a video", "match": ["generate", "render"] }],
+//     "allow_controls": ["New project"] }
+// held: what the owner ruled out. A switch or an owner-approved step is held when its name matches one:
+//   with "match", when the name holds any of those words; without it, when the name holds every
+//   meaningful word of the action ("generate a video" holds "Generate video", not "Video settings").
+// allow_controls: buttons named create, add or new that the owner said may be clicked on a live app.
+// The file is found from --limits <file>, then --audit <audit>, then the nearest one above --out.
+const LIMIT_STOP = new Set('a an the any all to do dont don not no never but and or of in on for with my your our it its this that these those please anything nothing yes ok okay use using used touch make making create just only can may you i me we them at as be is are app test tests real user like up more than'.split(' '));
+// A light stem, so "generating", "generated" and "generate" match, and "images" matches "image".
+const stem = w => {
+  if (w.length < 4) return w;
+  const s = w.replace(/(ing|ed)$/, m => (w.length - m.length >= 4 ? '' : m)).replace(/s$/, '').replace(/e$/, '');
+  return s.length >= 3 ? s : w;
+};
+const tokens = t => String(t || '').toLowerCase().replace(/[’']/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+export function useLimits(args, outDir = null, name = 'audit') {
+  const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
+  const places = [];
+  if (flag('--limits')) places.push(resolve(flag('--limits')));
+  if (flag('--audit')) places.push(join(resolve(flag('--audit')), 'use-limits.json'));
+  // --out is <audit>/explore or <audit>/walks/<task>: look in it and up to 2 folders above, no further.
+  for (let d = outDir ? resolve(outDir) : null, i = 0; d && i < 3; i++) { places.push(join(d, 'use-limits.json')); const up = dirname(d); if (up === d) break; d = up; }
+  const file = places.find(p => existsSync(p));
+  if (flag('--limits') && file !== places[0]) { console.error(`${name}: limits file ${flag('--limits')} not found.`); process.exit(2); }
+  if (!file) return null;
+  let raw;
+  try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { console.error(`${name}: ${file} is not valid JSON: ${e.message}. Fix it before using the app: it holds the owner's limits.`); process.exit(2); }
+  const held = (Array.isArray(raw.held) ? raw.held : []).map(h => typeof h === 'string' ? { action: h } : h).filter(h => h && h.action)
+    .map(h => ({ action: String(h.action), any: Array.isArray(h.match) && h.match.length > 0, words: (Array.isArray(h.match) && h.match.length ? h.match.flatMap(tokens) : tokens(h.action).filter(w => !LIMIT_STOP.has(w))).map(stem) }))
+    .filter(h => h.words.length);
+  return { file, answer: String(raw.answer || ''), owner_words: String(raw.owner_words || ''), allowed: (raw.allowed || []).map(String), held, allow_controls: (raw.allow_controls || []).map(s => String(s).trim().toLowerCase()).filter(Boolean) };
+}
+// The held action a name matches, or null.
+export function heldBy(limits, name) {
+  if (!limits || !limits.held.length) return null;
+  const have = tokens(name).map(stem);
+  const has = w => have.some(t => t === w || (Math.min(t.length, w.length) >= 4 && (t.startsWith(w) || w.startsWith(t))));
+  return limits.held.find(h => h.any ? h.words.some(has) : h.words.every(has)) || null;
+}
+
 // ---- Staying signed in -------------------------------------------------------------------------
 // Many apps swap their sign-in token on every refresh, so a session file saved at sign-in goes stale
 // within seconds. The sign-in window's own browser profile always holds the newest token, so the

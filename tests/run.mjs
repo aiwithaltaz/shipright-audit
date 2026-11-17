@@ -328,6 +328,14 @@ if (hasPw) {
   ok('drift, layout shift and reduced motion: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
 }
 
+// 20. Everything added in 0.8 (tests/v08.mjs): the use-it answer and its limits, signin.json, items opened
+// through buttons, ShipRight's own files never read as the owner's rules, the 5 new page checks, markers
+// with no filter, item lifecycles, and Create and Add buttons on a live app.
+{
+  const { run08 } = await import('./v08.mjs');
+  await run08(ok, { hasPw });
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);

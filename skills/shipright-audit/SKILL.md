@@ -20,7 +20,8 @@ Copy this into your working notes and tick each line as you finish it. Do not st
 
 ```
 Audit progress:
-- [ ] 0. Started: one line to the owner, tools ready, owner's rules read, door checked, signed in with the profile
+- [ ] 0. Started: one line and the use-it question to the owner, tools ready, owner's rules read, door checked, signed in with the profile
+- [ ] 0b. The use-it answer is in (yes, no, or yes with limits), or the session is unattended
 - [ ] 1. Every screen reached, signed in and signed out
 - [ ] 1b. Every safe control opened
 - [ ] 1c. Existing results opened (read-only)
@@ -50,9 +51,12 @@ Audit progress:
 
 ## Step 0: Start without a questionnaire
 
-The owner asked for an audit, so start it. Do not open with a list of questions: crawl first, and ask only when something blocks you. Each question below is asked only when its trigger happens, in one short message.
+The owner asked for an audit, so start it. Do not open with a list of questions: crawl first. The first message carries one question (below) that does not block the start. Every other question is asked only when its trigger happens, in one short message.
 
-1. **Say one line and start.** "Auditing <url>. Read-only: I won't publish, send, delete, generate or save anything." Then go on.
+1. **Say one line, ask one question, and start.** Your first message is these two paragraphs, word for word, with nothing after them. Then go on at once:
+   "Auditing <url>. Read-only: I won't publish, send, delete, generate or save anything.
+   One question while I start: may I use the app like a real user? I'd flip switches and turn them back, send up to 3 short test messages and make 1 test item, under $1, and list everything I create. Reply yes, no, or yes with limits (for example: yes, but don't generate a video)."
+   What happens with the answer is in 6.
 2. **Version.** Execute `node <skill>/scripts/version.mjs`. Never stop for it. If it says a newer version is out, end the reply with the update note (below).
 3. **Tools.** Execute `node <skill>/scripts/setup.mjs`. It installs Playwright in a ShipRight tools folder in the user's home, never in the app, and does nothing if Playwright is already there. Do not ask first. If it fails, audit by hand and say what that cost.
 4. **Check the door.** Run the crawl (Step 1). Then:
@@ -63,9 +67,13 @@ The owner asked for an audit, so start it. Do not open with a list of questions:
    - **Mostly empty:** only now ask: "Your screens are mostly empty. Is there an account with real-looking data? If not, I'll go on and mark layout findings as low confidence." If there is no answer, go on.
    - **Neither:** do not ask anything. Go on.
 5. **Owner's complaints.** Never ask for them up front: they bias what you look for. If the owner offers them, label those pains Reported. Never open a file that may list them (see 7) before the gate passes.
-6. **Use it like a real user: one question.** Looking is not enough: most of what owners complain about is what happens when you use a feature. Ask once, after the crawl, in these words: "Can I use the app like a real user? I would flip the switches in menus and turn them back, send up to 3 short test messages, and make 1 test item. Estimated cost: under $1. Everything I create will be listed so you can delete it. (Default: no.)" Do not wait long: if there is no answer, the answer is no, and you go on.
+6. **Use it like a real user: wait for the answer.** Looking is not enough: most of what owners complain about is what happens when you use a feature. The question went out in your first message (1).
+   - **Work while you wait.** The crawl (Step 1), opening controls without `--use` (Step 1b), existing results (Step 1c), naming the tasks (Step 2) and the leader research (Step 4b) do not need the answer. Do them.
+   - **Then stop and wait.** Before the first step that needs the answer (Step 1b with `--use`, a test message in Step 3), check for it. If the owner has not answered, stop: ask again as the last thing on screen, "Before I go on: may I use the app like a real user? Reply yes, no, or yes with limits.", and end your turn. If your tool has a way to ask the owner a question, use it. **Never treat silence as no in a live session**, and never ask and go on in the same message.
+   - **Unattended only.** When nobody can answer (a scheduled or headless run, with no person in the session), go on read-only. The header says `Used as a user: not answered (unattended)`, and Not verified gets the line below.
    - **On yes:** run Step 1b with `--use`, and mark the test-message steps in Step 3 `"owner_said_yes": true`. Stay inside what was asked: at most 3 short test messages (say they are tests, for example "ShipRight test: please ignore") and 1 test item. The header says `Used as a user: yes (N actions)`, and Left behind lists every test message, every test item and every switch flipped.
-   - **On no (or no answer):** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
+   - **On yes with limits:** write `<audit>/use-limits.json` before you use anything. Keep the owner's own words: `{ "answer": "yes with limits", "owner_words": "<what the owner wrote>", "allowed": ["<each thing they allowed>"], "held": [{ "action": "<each thing they ruled out>", "match": ["<the words on the buttons or switches that would do it>"] }] }`. `explore.mjs --use` and `walk.mjs` read it and hold every switch or owner-approved step that matches a held action. Hold the same things when you work by hand. The header says `Used as a user: yes with limits: "<owner's words>" (N actions)`, and Not verified names each thing that was held.
+   - **On no:** flip and send nothing. The header says `Used as a user: no`, and Not verified gets the line "How features behave when used (switches, sending, results)".
    - **Never, even on yes:** publish, send email or messages to other people, delete, pay, invite, connect an account, or change account settings. Each of those needs its own exact yes.
 7. **Read the owner's own rules first.** Without asking, execute `node <skill>/scripts/owner-rules.mjs <project folder> --out <audit>/owner-rules.md`. It looks in the folder for design rules and history (`DESIGN.md`, `design-system*`, `*taste*`, style guides, `CHANGELOG*`, `docs/**/*.md` and the README) and quotes each rule and each decision with its file and line. Then read those files yourself and add any rule it missed to `owner-rules.md`, quoted word for word. Also say one line that does not wait for an answer: "If you have design rules or a changelog, drop the file here any time." If the owner does, run it again with `--add <file>`.
    - **Benchmark fairness.** Design rules and changelogs are allowed. A list of the owner's current complaints is never read before the gate passes, even if it sits in the folder (`*complaints*`, `*notes*`, `*issues*`, `*feedback*` and the like). The script skips such files without opening them. Do not open them either, and name each one as skipped in the header's "Context used" line.
@@ -98,7 +106,7 @@ Audits miss what they never open: a dialog behind an icon, a button that does no
 - It hovers every icon-only control (does a tooltip say what it does?), clicks every control that opens something, records what opened, and catches console and network errors from each click. It never clicks risky words or form submits, and on a live app it skips controls whose effect is unknown.
 - Read `explore.md`. Open the **not clicked** controls yourself when the name makes the effect clear and it cannot save, send or spend: a dialog that asks before it saves is safe to open and close. Look inside everything that opened: the confusing part is often the panel, not the button.
 - Features that need hardware or real input (voice, camera, payments) cannot be fully tested. Click what is safe, report any error, and list the rest in Not verified by name ("Voice input: not tested, no microphone").
-- **Switches are never flipped without the owner's yes.** After a yes to the Step 0 question, run it again with `--use`: it flips each switch in the menus it opens and on the page, waits for the page to settle, records what changed on screen (new chips, new panels, text near the message box, the URL) with before and after screenshots, then turns it back and checks it is back. A switch that adds something visible away from itself is a `toggle-side-effect` lead. It skips switches on settings and account screens and ones with risky or account-wide names: those need their own yes. If a switch could not be turned back, tell the owner at once and list it in Left behind.
+- **Switches are never flipped without the owner's yes.** After a yes to the Step 0 question, run it again with `--use` (with `use-limits.json` in the audit folder it holds every switch that matches a held action, and lists it as held): it flips each switch in the menus it opens and on the page, waits for the page to settle, records what changed on screen (new chips, new panels, text near the message box, the URL) with before and after screenshots, then turns it back and checks it is back. A switch that adds something visible away from itself is a `toggle-side-effect` lead. It skips switches on settings and account screens and ones with risky or account-wide names: those need their own yes. If a switch could not be turned back, tell the owner at once and list it in Left behind.
 - Put the totals in the header: "Controls opened: N of M". `explore.md` prints the line to copy.
 
 ## Step 1c: Open existing results (read-only)
@@ -120,7 +128,7 @@ From the app's own labels, docs and data, name the 3 to 5 tasks it exists for. W
 
 Walk each task as a first-time user, start to finish. Record every step: clicks, typing, waits, scrolls, dead ends, unclear words, and places you had to remember something from an earlier screen. Count steps and screens. Note where it broke.
 
-1. Write a plan file, `<audit>/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step.
+1. Write a plan file, `<audit>/walks/<task>.json`, using the words a user sees on screen (format at the top of `<skill>/scripts/walk.mjs`). Leave out any step the safety rule forbids. On a live app the walker holds back clicks on risky words and typing outside search boxes, unless the step has `"owner_said_yes": true` because the owner said yes to that exact step. A step the owner's limits rule out (`use-limits.json`) is held even with that mark.
 2. Execute `node <skill>/scripts/walk.mjs <index.html or url> <audit>/walks/<task>.json [sign-in] --out <audit>/walks/<task>`.
 3. Read `walk.md`. It gives the action count, a screenshot per step, and where the walk broke at 1280 and at 390. A break at 390 only is a phone pain.
 4. Use those step screenshots as evidence for pains inside the flow.
@@ -231,7 +239,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Scope, out of scope and reviewer count are stated.
 - [ ] The header says how many controls were opened.
 - [ ] The header states "Phone coverage: X of Y in-scope screens", and every screen in Screens has a 390 screenshot or is named in Not verified.
-- [ ] The header says "Used as a user: yes (N actions)" or "no". On yes, Left behind lists every action. On no, Not verified says "How features behave when used (switches, sending, results)".
+- [ ] The header says "Used as a user: yes (N actions)", "yes with limits: "<owner's words>" (N actions)", "no" or "not answered (unattended)". On yes, Left behind lists every action. On no or not answered, Not verified says "How features behave when used (switches, sending, results)". "not answered" without "unattended" fails: in a live session you wait for the answer.
 - [ ] The header says "Competitor research: live, checked <date>", or "from knowledge, no web tool" when no web tool exists.
 - [ ] Every screen in scope appears in Screens.
 - [ ] At least 3 task walks, each with a step count.
@@ -249,7 +257,7 @@ Mark each pain Now, Next or Later. Now is what fits one release. Group the Now p
 - [ ] Not verified lists everything you could not check, including any screen or width you did not see, any feature you could not use, and anything a script could not reach.
 - [ ] Left behind lists everything you created or changed (test messages, test items, switches flipped, the session file, the sign-in profile folder), or says "Nothing".
 
-**The header.** Under the title, the pain map states: the date, screens in scope, tasks walked, `Controls opened: N of M`, reviewers, method, widths seen and data, then `Phone coverage: X of Y in-scope screens`, `Used as a user: yes (N actions)` or `no`, and `Competitor research: live, checked <date>` or `from knowledge, no web tool`, then Scope, Out of scope and Context used (owner rules read, files skipped for fairness).
+**The header.** Under the title, the pain map states: the date, screens in scope, tasks walked, `Controls opened: N of M`, reviewers, method, widths seen and data, then `Phone coverage: X of Y in-scope screens`, `Used as a user:` with one of `yes (N actions)`, `yes with limits: "<owner's words>" (N actions)`, `no` or `not answered (unattended)`, and `Competitor research: live, checked <date>` or `from knowledge, no web tool`, then Scope, Out of scope and Context used (owner rules read, files skipped for fairness).
 
 ## Output
 
@@ -266,7 +274,7 @@ Keep it short. In this order:
 5. **Themes:** 3 to 5, with the pain IDs in each.
 6. **Decisions for the owner:** up to 4. Each has 2 to 3 options, your pick first with the reason, and "You decide". Things that may be on purpose (a name, a tone, a style) are asked here, never listed as pains.
 7. **Confidence:** reviewers used, how much real data the screens held, and "These are expert findings. Test the top 3 with 3 to 5 real users." Offer a short user-test script.
-8. **Not verified:** what you could not check: screens or widths not seen, features not used (when the owner said no: "How features behave when used (switches, sending, results)"), hardware features, and anything a script could not reach.
+8. **Not verified:** what you could not check: screens or widths not seen, features not used (when the owner said no or the session was unattended: "How features behave when used (switches, sending, results)"; on yes with limits: each thing the owner's limits held), hardware features, and anything a script could not reach.
 9. **Left behind:** everything you created or changed in the app (every test message and test item, every switch flipped and whether it is back, drafts, notifications) and in the folder (packages, the session file, the sign-in profile folder in `~/.shipright/profiles`). Offer to remove what you can. Always remind the owner to delete `.session.json` and the profile folder: both hold their sign-in.
 10. **Next step:** "Pick the themes to fix first. I can draft the fixes for one theme, or write the user-test script."
 11. **Update note:** only if `version.mjs` said a newer version is out: "**ShipRight Audit <new> is out** (you have <old>). Say 'update it' and I'll fetch it." When the owner says yes, execute `node <skill>/scripts/version.mjs --fetch` and pass on the steps it prints (restart, `/plugin`, Installed, Shipright audit, Update). It refreshes Claude Code's saved copy of this plugin's marketplace, which is the only change it makes, so never run it without that yes.
@@ -275,6 +283,8 @@ Keep it short. In this order:
 
 - Edit, install into, deploy or push the app.
 - Click anything the safety rule forbids, or flip a switch, without the owner's yes.
+- Treat silence as a no in a live session, or ask the use-it question and go on in the same message past a step that needs the answer.
+- Do anything the owner's limits rule out.
 - Go on signed out after a script said "The app signed us out".
 - Open a file that may list the owner's current complaints before the gate passes.
 - List an owner decision, or a feature's own name, as a pain.
