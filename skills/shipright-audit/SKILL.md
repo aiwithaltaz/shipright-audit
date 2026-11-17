@@ -118,10 +118,11 @@ The owner's own data is the best test data. A generated image that never shows, 
 
 - It finds item lists (past chats, library, projects, files: links in a navigation, side panel, list or table that share a pattern), opens up to 5 items per list (`--samples N`), and prefers items whose page holds images, files, code, artifacts, or tool and connector results.
 - On each item, at 1280 and 390, it scrolls through, saves a full-page screenshot and runs the page checks plus the result checks: **media that never loaded** (a broken image, a dead video, a "click to load image" placeholder where the media should be), **clipped text**, and **action buttons with no name**.
-- It is read-only: it opens each item by its address and scrolls. It never clicks or types. Do the same by hand: never click inside a result, except to open it.
+- **Items that open through buttons, not links** (project cards with a View button, for example): it opens up to 5 per list through the read-only button on each card: View, Open, Preview, Details, Review, Watch, or an icon button whose name says so. After each one it records what opened (a dialog, a panel, a new page, or nothing), screenshots it at 1280 and 390, runs the checks on what opened, then closes it or goes back. A View or Review button that opens nothing is a lead. It never clicks Edit (editors autosave) and never a risky word.
+- It is read-only: it opens each item by its address and scrolls, or through its read-only button. It never types. Do the same by hand: never click inside a result, except to open it.
 - Read `samples.md` and look at every `R-*.png` page screenshot yourself: does the result look right, at both widths? Scripts cannot judge that.
 - Its leads are **R##**. Decide each one in **Script leads**, like V## and E##.
-- If it finds no item lists (items opened by buttons, not links), open 3 to 5 past items by hand at both widths and say so in the header. If the account has no past items, write that in Not verified.
+- If it finds no item lists at all (no item links and no cards with a read-only button), open 3 to 5 past items by hand at both widths and say so in the header. If the account has no past items, write that in Not verified.
 
 ## Step 2: Name the core tasks
 

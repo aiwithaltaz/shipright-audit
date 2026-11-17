@@ -109,6 +109,30 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     app.stop();
     ok('login.mjs does not save a sign-in from a public page that still shows "Sign in"', pub.code === 1 && !existsSync(join(audit2, 'signin.json')) && !existsSync(join(audit2, '.session.json')), `exit ${pub.code}`);
   }
+
+  // Step 3. Cards that open through buttons, not links. One "View" opens a dialog, one "Open" shows a
+  // panel, one "Review" does nothing: 2 opened items, 1 "nothing opened" lead, and Edit is never clicked.
+  if (want('buttons') && hasPw) {
+    const app = await serveFixture('tests/fixtures/button-cards-app/index.html');
+    const out = tmp('buttons');
+    const r = await runNode([S + 'samples.mjs', app.url, '--out', out]);
+    app.stop();
+    const sm = readJson(join(out, 'samples.json'), { items: [], leads: [], lists: [] });
+    const via = sm.items.filter(i => i.via_button);
+    const opened = via.filter(i => /^a /.test(i.opened?.['1280'] || ''));
+    const nothing = sm.leads.filter(l => l.kind === 'nothing-opened');
+    ok('samples opens button-only cards: 2 opened items and 1 "nothing opened" lead',
+      r.code === 0 && via.length === 3 && opened.length === 2 && opened.map(i => i.opened['1280']).sort().join() === 'a dialog,a panel' && opened.every(i => i.opened['390'] === i.opened['1280'] && existsSync(join(out, i.shots['1280'])) && existsSync(join(out, i.shots['390'])))
+      && nothing.length === 1 && sm.leads.length === 1 && /^R\d+$/.test(nothing[0].id) && /"Review" on "Budget review" opened nothing/.test(nothing[0].what) && nothing[0].widths.join() === '1280,390' && sm.lists[0]?.by === 'buttons',
+      `exit ${r.code}: ${via.map(i => `${i.via_button}: ${i.opened?.['1280']}`).join(', ')}; leads: ${sm.leads.map(l => l.kind).join(', ') || 'none'}`);
+    ok('samples never clicks Edit, and presses each read-only button once per width',
+      !app.hits.includes('edit') && ['view', 'open', 'review'].every(b => app.hits.filter(h => h === b).length === 2), app.hits.join(' ') || 'no clicks reached the app');
+    // The existing fixture, whose items are links, is opened by address as before: no button is pressed.
+    const lo = tmp('buttons-links');
+    runSync([S + 'samples.mjs', 'tests/fixtures/results-app/index.html', '--samples', '2', '--out', lo]);
+    const lk = readJson(join(lo, 'samples.json'), { items: [{ via_button: 'x' }] });
+    ok('samples still opens linked items by address', lk.items.length === 2 && lk.items.every(i => !i.via_button), `${lk.items.length} items`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
