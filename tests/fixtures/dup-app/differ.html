@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Compare answers</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid #8a8a84; position: relative; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 24px 120px; }
+button { font: inherit; }
+.pick { padding: 8px 12px; border: 1px solid #6b6b66; border-radius: 8px; background: #fff; }
+.menu { position: absolute; background: #fff; border: 1px solid #6b6b66; border-radius: 8px; padding: 6px; display: grid; min-width: 200px; z-index: 5; }
+.menu[hidden] { display: none; }
+.menu button { padding: 8px 12px; border: 0; background: none; text-align: left; }
+#top-menu { right: 24px; top: 52px; }
+.box { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #8a8a84; padding: 12px 24px; }
+.box .row { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; position: relative; }
+.box textarea { flex: 1; height: 44px; padding: 10px; border: 1px solid #6b6b66; border-radius: 8px; font: inherit; }
+#box-menu { left: 0; bottom: 52px; }
+table { width: 100%; border-collapse: collapse; position: relative; }
+td { padding: 8px 0; border-bottom: 1px solid #ccc; position: relative; }
+td .menu { right: 0; top: 40px; }
+</style></head>
+<body>
+<header><strong>Compare answers</strong><button class="pick" id="top" aria-haspopup="menu" aria-expanded="false">Sort</button>
+  <div class="menu" role="menu" id="top-menu" hidden><button role="menuitem">Newest first</button><button role="menuitem">Oldest first</button><button role="menuitem">By name</button></div></header>
+<main>
+  <h1>Compare answers</h1>
+  <p>Ask once and read two answers side by side.</p>
+  <table><tbody>
+    <tr><td>Trip plan</td><td><button class="pick more" aria-haspopup="menu" aria-expanded="false" >Trip plan options</button><div class="menu" role="menu" hidden><button role="menuitem">Rename</button><button role="menuitem">Move</button><button role="menuitem">Export</button></div></td></tr>
+    <tr><td>Budget</td><td><button class="pick more" aria-haspopup="menu" aria-expanded="false" >Budget options</button><div class="menu" role="menu" hidden><button role="menuitem">Rename</button><button role="menuitem">Move</button><button role="menuitem">Export</button></div></td></tr>
+    <tr><td>Reading list</td><td><button class="pick more" aria-haspopup="menu" aria-expanded="false" >Reading list options</button><div class="menu" role="menu" hidden><button role="menuitem">Rename</button><button role="menuitem">Move</button><button role="menuitem">Export</button></div></td></tr>
+  </tbody></table>
+</main>
+<div class="box"><div class="row">
+  <button class="pick" id="box" aria-haspopup="menu" aria-expanded="false">Model: Auto</button>
+  <div class="menu" role="menu" id="box-menu" hidden><button role="menuitem">Auto (free)</button><button role="menuitem">Swift</button><button role="menuitem">Sage</button><button role="menuitem">Sage Max</button><button role="menuitem">Atlas</button></div>
+  <textarea aria-label="Message" placeholder="Ask something"></textarea>
+</div></div>
+<script>
+  const pairs = [...document.querySelectorAll('[aria-haspopup=menu]')].map(b => [b, b.nextElementSibling]);
+  const closeAll = () => pairs.forEach(([b, m]) => { m.hidden = true; b.setAttribute('aria-expanded', 'false'); });
+  pairs.forEach(([b, m]) => { b.onclick = () => { const open = m.hidden; closeAll(); m.hidden = !open; b.setAttribute('aria-expanded', String(open)); }; });
+  addEventListener('keydown', e => { if (e.key === 'Escape') closeAll(); });
+</script>
+</body>
+</html>

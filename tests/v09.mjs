@@ -141,6 +141,20 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
       held.hits.length === 0 && (held.json.options || []).length === 0 && held.json.use.option_picks === 0 && used.hits.length === 3 && used.json.use.option_picks === 3 && used.row.restored === true,
       `without --use: ${held.hits.length} pick(s); with --use: ${used.hits.length} pick(s), ${used.json.use.option_picks} counted`);
   }
+
+  // Step 7. Duplicate controls under different names. A "Model: Auto" button in the message box and an
+  // "Auto (free)" button in the top bar open lists with the same models (5 of 6 options in common):
+  // 1 lead. Two buttons that open different menus give none. The same menu on every row of a table
+  // is not a duplicate either.
+  if (want('duplicate') && hasPw) {
+    const same = explore('tests/fixtures/dup-app/index.html', ['--widths', '1280']), differ = explore('tests/fixtures/dup-app/differ.html', ['--widths', '1280']);
+    const leads = same.json.leads.filter(l => l.kind === 'duplicate-on-screen');
+    ok('duplicate-on-screen: two model pickers with different names that open the same list are 1 lead',
+      leads.length === 1 && /^Two controls do the same job here: "Auto \(free\)" and "Model: Auto" both open a menu with the same options/.test(leads[0].what) && leads[0].detail.options_in_common === 5 && !!leads[0].shot && existsSync(join(same.o, leads[0].shot)), say(leads));
+    const opened = differ.json.controls.filter(c => /^opened menu/.test(c.result || '')).length;
+    ok('duplicate-on-screen: two buttons that open different menus give none, and row menus are not duplicates',
+      !differ.json.leads.some(l => l.kind === 'duplicate-on-screen') && opened === 5, `${say(differ.json.leads)}; ${opened} menus opened`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

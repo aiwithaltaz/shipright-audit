@@ -47,6 +47,13 @@
 //   - Never picked: options with risky or account-wide words (plans, billing, roles, sharing, a
 //     language or a model), anything the owner's limits hold, and, on settings and account screens,
 //     anything that is not about the look of the app (theme, density, view).
+// And for two controls that do the same job under different names (new in 0.9):
+//   - The page check "duplicate-on-screen" only compares names and link targets inside navigations,
+//     so it misses two buttons with different names and no link, like a model picker in the message
+//     box and another in the top bar. This script knows what each control opens. Two controls on one
+//     screen that open the same menu, or menus whose options are over 80% the same, are one
+//     "duplicate-on-screen" lead: "Two controls do the same job here: A and B both open ...".
+//     Menus on the rows of one list (the same menu on every row) are not duplicates.
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -771,6 +778,33 @@ async function optionPass(url, width) {
     await markControls();
   }
 }
+// ---- Two controls that open the same thing ------------------------------------------------------
+// The menu or list that is open right now: its label and the names of its options. Dialogs do not
+// count: two ways into one dialog (a button and an empty-state link) are normal.
+const MENU_OF = (layers) => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const layer = [...document.querySelectorAll(layers)].filter(l => vis(l) && !l.matches('[role=dialog], [role=alertdialog], dialog, [aria-modal=true]')).pop();
+  if (!layer) return null;
+  let items = [...layer.querySelectorAll('[role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=option], [role=radio]')].filter(vis);
+  if (items.length < 2 && layer.matches('[role=menu], [role=listbox]')) items = [...layer.querySelectorAll('li, button, a')].filter(x => vis(x) && !x.querySelector('li, button, a'));
+  const options = [...new Set(items.map(i => (text(i) || i.getAttribute('aria-label') || '').replace(/\s+/g, ' ').slice(0, 40).toLowerCase()).filter(Boolean))];
+  if (options.length < 2) return null;
+  if (!layer.dataset.srmenu) { window.__srMenuN = (window.__srMenuN || 0) + 1; layer.dataset.srmenu = 'u' + window.__srMenuN; }
+  const by = (layer.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(text).join(' ');
+  return { id: layer.dataset.srmenu, label: (layer.getAttribute('aria-label') || by || '').slice(0, 40), options, shown: items.slice(0, 5).map(i => text(i).slice(0, 30)) };
+};
+// The list a control repeats in, if any: a row menu on every row of a table is one control, not many.
+const ROW_OF = (sel) => {
+  const el = document.querySelector(sel);
+  if (!el) return null;
+  const sig = x => x.tagName + '.' + [...x.classList].sort().join('.');
+  for (let x = el.parentElement, d = 0; x && x.parentElement && d < 5; x = x.parentElement, d++) {
+    const sibs = [...x.parentElement.children].filter(k => k !== x && sig(k) === sig(x) && [...k.querySelectorAll(el.tagName)].some(b => sig(b) === sig(el)));
+    if (sibs.length >= 2) { if (!x.parentElement.dataset.srrow) { window.__srRowN = (window.__srRowN || 0) + 1; x.parentElement.dataset.srrow = 'r' + window.__srRowN; } return x.parentElement.dataset.srrow; }
+  }
+  return null;
+};
 const markControls = () => page.evaluate(sel => { document.querySelectorAll(sel).forEach((el, i) => { el.dataset.sre = String(i); }); }, CONTROLS).catch(() => {});
 
 try {
@@ -825,6 +859,7 @@ try {
       // filter for them exists is decided after the menus on this page have been opened and read.
       const markers = firstWidth ? await page.evaluate(MARKERS).catch(() => []) : [];
       const layerTexts = [];
+      const menus = []; // what each control on this page opened, to find two controls that do the same job
       let clicked = 0, motionOpener = null;
       for (const c of controls) {
         const key = `${c.name}|${c.iconOnly}`;
@@ -877,6 +912,10 @@ try {
         // menu or dialog jump when it opened? (An accordion or a tab is meant to move the page.)
         if (newOpen.length && !picker) {
           layerTexts.push(await page.evaluate(sel => [...document.querySelectorAll(sel)].map(e => e.innerText || '').join('\n'), LAYERS).catch(() => ''));
+          if (!earlier) {
+            const menu = await page.evaluate(MENU_OF, LAYERS).catch(() => null);
+            if (menu) menus.push({ name: c.name, shot: row.shot, row: await page.evaluate(ROW_OF, sel).catch(() => null), ...menu });
+          }
           const overlay = newOpen.some(o => /^(dialog|alertdialog|menu|listbox):/.test(o));
           const inside = await page.evaluate(analyzeScript({ within: LAYERS, only: ['clipped-text', 'layout-shift'], shiftWithInput: true })).catch(() => ({ findings: [] }));
           for (const f of inside.findings) {
@@ -908,6 +947,17 @@ try {
           await settle(page, { timeout: 6000 });
           await markControls(); // data-sre marks are gone after a reload: mark again in the same order
         }
+      }
+      // Two controls with different names that open the same menu, or menus with the same options.
+      const paired = new Set();
+      for (let i = 0; i < menus.length; i++) for (let j = i + 1; j < menus.length; j++) {
+        const a = menus[i], b = menus[j];
+        if (paired.has(i) || paired.has(j) || a.name === b.name || (a.row && a.row === b.row)) continue;
+        const common = a.options.filter(o => b.options.includes(o)).length;
+        if (a.id !== b.id && common / Math.max(a.options.length, b.options.length) <= 0.8) continue;
+        paired.add(i); paired.add(j);
+        const what = a.label ? `the "${a.label}" menu` : `${a.id === b.id ? 'the same menu' : 'a menu with the same options'} (${a.shown.slice(0, 4).join(', ')})`;
+        lead('duplicate-on-screen', `Two controls do the same job here: "${a.name}" and "${b.name}" both open ${what}`, url, width, a.shot || b.shot, { group: `duplicate-opens|${a.name}|${b.name}`, detail: { how: 'opens', controls: [a.name, b.name], menu: a.label || null, options: a.shown, same_menu: a.id === b.id, options_in_common: common, of: Math.max(a.options.length, b.options.length) } });
       }
       // A marker you can set should be filterable: a star with no "Starred" filter, tab, chip or sort option.
       for (const m of markers) {
