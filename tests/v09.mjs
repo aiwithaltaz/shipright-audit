@@ -188,6 +188,75 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
       tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 3 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')), say(rail.json.leads));
     ok('the same rail with no labels on hover still gives 3 no-tooltip leads', tips(bare.json).length === 3, say(tips(bare.json)));
   }
+
+  // Step 9. Stability fixes.
+  if (want('stability') && hasPw) {
+    // (1) Signed out mid-run. This app swaps its sign-in token on every refresh, and answers the
+    // refresh slowly (250ms), like a real server. A script that loads the next page before the answer
+    // is back loses the new token and is signed out for good: that is what happened in 0.8. Crawl,
+    // explore, samples and visual run back to back on one profile, and no refresh answer may be lost.
+    // SHIPRIGHT_TEST_ROUNDS=3 runs the four scripts 3 times in a row on the same profile.
+    const { startRotatingApp } = await import('./fixtures/rotating-app/server.mjs');
+    const app = await startRotatingApp({ refreshDelay: 250 });
+    const env = { SHIPRIGHT_NO_HEADED: '1' };
+    const audit = tmp('v09-b2b'), prof = join(audit, 'profile');
+    const li = await runNode([S + 'login.mjs', `${app.url}?auto`, '--headless', '--timeout', '20', '--audit', audit, '--profile', prof], env);
+    const rounds = Math.max(1, Number(process.env.SHIPRIGHT_TEST_ROUNDS || 1));
+    const bad = [];
+    for (let round = 1; round <= rounds; round++) {
+      for (const [n, a] of [['crawl', [S + 'crawl.mjs', app.url, '--audit', audit]], ['explore', [S + 'explore.mjs', app.url, '--audit', audit, '--widths', '1280']], ['samples', [S + 'samples.mjs', app.url, '--audit', audit, '--widths', '1280']], ['visual', [S + 'visual.mjs', app.url, '--audit', audit, '--widths', '1280']]]) {
+        const r = await runNode(a, env);
+        if (r.code !== 0 || !/signed in with the sign-in profile/.test(r.err) || /signed us out/.test(r.err)) bad.push(`round ${round} ${n}: exit ${r.code} ${r.err.trim().split('\n').pop().slice(0, 120)}`);
+      }
+    }
+    const sm = readJson(join(audit, 'samples', 'samples.json'), { items: [] });
+    ok(`crawl, explore, samples and visual stay signed in back to back on one profile with a slow token refresh${rounds > 1 ? ` (${rounds} rounds)` : ''}`,
+      li.code === 0 && bad.length === 0 && app.stats.refresh_lost === 0 && app.stats.refresh_401 <= 1 && sm.items.length >= 3,
+      bad.join(' | ') || `${rounds * 4} script runs, ${app.stats.refresh_ok} token swaps, ${app.stats.refresh_lost} lost, ${sm.items.length} items opened`);
+    // A sign-in that does end mid-run is never silent: the script says so and exits 3.
+    const running = runNode([S + 'visual.mjs', app.url, '--audit', audit, '--out', join(audit, 'visual-expired')], env);
+    await new Promise(r => setTimeout(r, 6000));
+    app.expire();
+    const ended = await running;
+    app.stop();
+    ok('a sign-in that ends mid-run is reported: "The app signed us out during this run", exit 3', ended.code === 3 && /The app signed us out during this run \(401 on \/api\/auth\/refresh\)/.test(ended.err), `exit ${ended.code}: ${ended.err.trim().split('\n').pop().slice(0, 120)}`);
+
+    // (2) Switches that were not turned back. 5 switches on one page: 3 turn back when clicked again,
+    // 1 only resets when the page loads again, 1 stays on for good. Reported apart.
+    const sw = await serveFixture('tests/fixtures/switch-app/index.html');
+    const so = tmp('v09-switch');
+    await runNode([S + 'explore.mjs', sw.url, '--use', '--widths', '1280', '--out', so]);
+    sw.stop();
+    const sj = readJson(join(so, 'explore.json'), { use: {}, leads: [], switches: [] });
+    const flips = n => sw.hits.filter(h => h.startsWith(`flip=${n}:`)).map(h => h.split(':')[1]).join(',');
+    const md = existsSync(join(so, 'explore.md')) ? readFileSync(join(so, 'explore.md'), 'utf8') : '';
+    ok('switches: with several on one page each one is turned back, "back after reload" is reported apart from "not back"',
+      sj.use.switches_flipped === 5 && sj.use.turned_back === 3 && (sj.use.back_after_reload || []).join() === 'Live preview' && (sj.use.not_turned_back || []).join() === 'Beta layout'
+      && ['Show drafts', 'Show finished', 'Compact rows'].every(n => flips(n) === 'on,off') && sj.leads.filter(l => l.kind === 'toggle-not-restored').length === 1 && /"Beta layout"/.test(sj.leads.find(l => l.kind === 'toggle-not-restored').what)
+      && sj.leads.filter(l => l.kind === 'toggle-back-after-reload').length === 1 && /Back after reload .*Live preview/.test(md) && /\*\*Not back: Beta layout/.test(md),
+      `turned back ${sj.use.turned_back}, back after reload: ${(sj.use.back_after_reload || []).join()}, not back: ${(sj.use.not_turned_back || []).join()}`);
+
+    // (3) Dialog dismissal: Escape first, then the close (X) button, then "Got it" only when neither works.
+    const how = [];
+    for (const mode of ['escape', 'x', 'ok']) {
+      const app2 = await serveFixture('tests/fixtures/dialog-app/index.html');
+      const o = tmp('v09-dialog');
+      await runNode([S + 'visual.mjs', `${app2.url}?mode=${mode}`, '--no-click', '--widths', '1280', '--out', o]);
+      app2.stop();
+      const vj = readJson(join(o, 'visual.json'), { dialogs_closed: [] });
+      const note = existsSync(join(o, 'visual.md')) ? readFileSync(join(o, 'visual.md'), 'utf8') : '';
+      how.push({ mode, hits: app2.hits.join(), said: (vj.dialogs_closed[0] || {}).how || 'nothing', title: (vj.dialogs_closed[0] || {}).dialog, noted: /## Dialogs that covered a page/.test(note) && /Name each one in Left behind/.test(note) });
+    }
+    ok('a covering dialog is closed with Escape first, then the close (X) button, and "Got it" only when neither works',
+      how[0].hits === 'closed=escape' && how[0].said === 'Escape' && how[1].hits === 'closed=x' && how[1].said === 'the close (X) button' && how[2].hits === 'closed=ok' && how[2].said === 'the "Got it" button' && how.every(h => h.noted && h.title === "What's new"),
+      how.map(h => `${h.mode}: ${h.hits || 'not closed'} (${h.said})`).join(' · '));
+
+    // (4) overflow-box and fonts: a chip 6px outside a 358px card (what a different font does) stays
+    // quiet. A chip 114px outside its card is still a lead.
+    const small = visual('tests/fixtures/checks-app/overflow-small.html', ['--no-click']), big = visual('tests/fixtures/checks-app/overflow.html', ['--no-click']);
+    const out = j => j.leads.filter(l => l.kind === 'overflow-box');
+    ok('overflow-box: 6px outside a 358px card stays quiet, 114px outside is still a lead', out(small.json).length === 0 && small.json.leads.length === 0 && out(big.json).length === 1, `small: ${say(small.json.leads)}; big: ${say(out(big.json))}`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

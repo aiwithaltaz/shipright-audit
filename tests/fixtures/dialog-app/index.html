@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Planner</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; }
+.veil { position: fixed; inset: 0; background: rgba(0, 0, 0, .5); display: flex; align-items: center; justify-content: center; }
+.veil[hidden] { display: none; }
+.card { position: relative; width: 420px; max-width: 90vw; background: #fff; border-radius: 12px; padding: 24px; }
+.card h2 { margin: 0 0 8px; }
+.x { position: absolute; right: 12px; top: 12px; width: 32px; height: 32px; border: 0; background: none; font-size: 20px; }
+.ok { margin-top: 12px; padding: 10px 16px; border: 0; border-radius: 8px; background: #1a56db; color: #fff; font: inherit; }
+</style></head>
+<body>
+<main><h1>Planner</h1><p>Three tasks are due this week.</p></main>
+<div class="veil" id="veil">
+  <div class="card" role="dialog" aria-modal="true" aria-labelledby="t">
+    <button class="x" id="x" aria-label="Close">&#215;</button>
+    <h2 id="t">What's new</h2>
+    <p>Boards can now be shared with a link.</p>
+    <button class="ok" id="ok">Got it</button>
+  </div>
+</div>
+<script>
+  const mode = new URLSearchParams(location.search).get('mode') || 'escape';
+  const tell = what => fetch('/api/' + what, { method: 'POST' }).catch(() => {});
+  const close = how => { document.getElementById('veil').hidden = true; tell('closed=' + how); };
+  if (mode === 'ok') document.getElementById('x').remove();
+  else document.getElementById('x').onclick = () => close('x');
+  document.getElementById('ok').onclick = () => close('ok');
+  addEventListener('keydown', e => { if (e.key === 'Escape' && mode === 'escape' && !document.getElementById('veil').hidden) close('escape'); });
+</script>
+</body>
+</html>

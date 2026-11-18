@@ -29,7 +29,7 @@
 // Writes samples.json, samples.md, R-<list>-<item>-<width>.png page screenshots and R##-*.png crops to
 // --out (the skill passes <audit>/samples). Leads are R##: decide each one in the pain map's Script leads.
 // Exit 0 ran, 2 usage or missing Playwright, 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, auditPaths, landedOn, shootFinding, checkLayers, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, auditPaths, landedOn, shootFinding, checkLayers, uncover, dialogList, dialogNote, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -243,6 +243,7 @@ try {
     for (const it of items) {
       await page.goto(it.url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       if (!(await settle(page))) it.settled = false;
+      await uncover(page, 'samples');
       if (it.via_button) { await openByButton(it, width); continue; }
       await page.evaluate(SCROLL).catch(() => {});
       await settle(page, { timeout: 4000 });
@@ -285,7 +286,7 @@ leads.forEach((l, i) => {
 });
 const outItems = items.map(({ mark, ...it }) => ({ ...it, url: local(it.url) }));
 const byButton = outItems.filter(i => i.via_button);
-writeFileSync(join(outDir, 'samples.json'), JSON.stringify({ target, widths, samples_per_list: N, signed_in_with: opened.mode !== 'none' ? opened.label : null, lists, items: outItems, leads }, null, 2) + '\n');
+writeFileSync(join(outDir, 'samples.json'), JSON.stringify({ target, widths, samples_per_list: N, signed_in_with: opened.mode !== 'none' ? opened.label : null, lists, items: outItems, dialogs_closed: dialogList(local), leads }, null, 2) + '\n');
 const md = ['# Existing results, opened read-only', '',
   `${lists.length} item list(s), ${items.length} item(s) opened at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   (byButton.length ? `Nothing was typed. ${outItems.length - byButton.length} item(s) were opened by their address and scrolled. ${byButton.length} item(s) have no link, so each was opened through the read-only button on its card (${[...new Set(byButton.map(i => `"${i.via_button}"`))].join(', ')}), then closed. No Edit button and no risky word was clicked.` : 'Nothing was clicked or typed: each item was opened by its address and scrolled.') + ' Every lead below goes in the pain map\'s **Script leads** table (R##): a pain ID, or Rejected with what you saw. Look at each page screenshot too: the scripts cannot judge whether a result looks right.', ''];
@@ -298,5 +299,6 @@ md.push('## Leads', '', '| Lead | Check | What it found | Widths | Items | Scree
   ...lists.map(l => `| ${l.list} | ${l.pattern} | ${l.found_on} | ${l.items_in_list} | ${l.looked_at} | ${l.opened} |`),
   '', '## Items opened', '', '| List | Item | Title | Holds, or what the button opened | Screenshots |', '| --- | --- | --- | --- | --- |',
   ...outItems.map(i => `| ${i.list} | ${i.url} | ${(i.title || '').replace(/\|/g, '/')}${i.via_button ? ` (button "${i.via_button}")` : ''} | ${i.via_button ? Object.entries(i.opened).map(([w, v]) => `at ${w}: ${v}`).join(', ') : Object.entries(i.holds).filter(([k, v]) => v && k !== 'words').map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'text only'} | ${Object.values(i.shots).join(', ')} |`));
+md.push(...dialogNote(local));
 writeFileSync(join(outDir, 'samples.md'), md.join('\n') + '\n');
 console.log(`samples: ${lists.length} item list(s), ${items.length} item(s) opened at ${widths.join(' and ')} wide, ${leads.length} lead(s) · ${outDir}`);

@@ -24,6 +24,8 @@
 //                        background (WCAG 1.4.11), measured from the SVG stroke or fill or the icon font
 //                        color, with opacity included
 //   overflow-box         a chip, pill, badge or button that sticks out of its card by more than 2px
+//                        and more than 4% of the card's width (since 0.9: a few pixels of font
+//                        difference between computers stay quiet)
 //   duplicate-on-screen  the same text block (40 characters or more) in two sections, or the same
 //                        control in two navigations
 //   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
@@ -463,11 +465,11 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   }
 
   // ---- Overflowing its box: a chip, pill, badge or button that sticks out of its card ---------------
-  // More than 2px outside the nearest boxed container (a border, a shadow or its own background), with
-  // nothing clipping it. Not flagged: menus, tooltips and pop-overs, and anything placed out of the
+  // More than 2px, and more than 4% of the box's width, outside the nearest boxed container (a border,
+  // a shadow or its own background), with nothing clipping it. Not flagged: menus, tooltips and pop-overs, and anything placed out of the
   // flow on purpose (absolute, fixed or sticky: a corner badge, a ribbon).
   {
-    const OUT = 2;
+    const OUT = 2, SHARE = 0.04;
     const POPUP = '[role=menu], [role=tooltip], [role=listbox], [popover], dialog, [class*=tooltip i], [class*=popover i], [class*=dropdown i]';
     const cands = new Set([...pills, ...document.querySelectorAll('button, [role=button], a[class*=btn i], a[class*=button i], [class*=chip i], [class*=badge i], [class*=pill i]')]);
     const boxed = el => {
@@ -504,8 +506,12 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
       const boxCs = getComputedStyle(box);
       if (boxCs.overflowX !== 'visible' || boxCs.overflowY !== 'visible') continue; // the card clips it: clipped-text reports that
       const b = box.getBoundingClientRect();
-      const out = Math.max(r.right - b.right, b.left - r.left, r.bottom - b.bottom, b.top - r.top);
-      if (out <= OUT) continue;
+      const sideways = Math.max(r.right - b.right, b.left - r.left), updown = Math.max(r.bottom - b.bottom, b.top - r.top);
+      const out = Math.max(sideways, updown);
+      // More than 2px, and more than 4% of the box it sticks out of (its width for sideways, its height
+      // for up and down). A few pixels come and go with the font a computer happens to have: the same
+      // chip can sit inside its card on a Mac and 6px outside it on Linux.
+      if (out <= OUT || out <= SHARE * (sideways >= updown ? b.width : b.height)) continue;
       const have = hits.get(box);
       if (!have || out > have.out) hits.set(box, { el: c, box, out: Math.round(out), text: text(c).slice(0, 40), n: (have ? have.n : 0) + 1 });
       else have.n++;

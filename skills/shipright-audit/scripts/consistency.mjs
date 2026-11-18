@@ -23,7 +23,7 @@
 // Labels file: { "remove": ["Remove"], "save": ["Save"] }. A data-action value must use one of those words.
 //
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first.
-import { openContext, signInFlags, openTarget, pagesToVisit, settle, auditFolder, auditPaths, landedOn, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, settle, auditFolder, auditPaths, landedOn, DANGER, uncover, dialogList, dialogNote } from './browser.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -213,6 +213,7 @@ try {
     for (const url of urls) {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       await settle(page);
+      await uncover(page, 'consistency');
       await page.mouse.move(0, 0).catch(() => {});
       const found = await page.evaluate(COMPONENTS, DANGER.source).catch(() => []);
       for (const c of found) {
@@ -247,7 +248,7 @@ try {
         shot: odd[0].shot, shots: [usual.shot, ...odd.map(v => v.shot)].filter(Boolean),
       });
     }
-    writeFileSync(join(outDir, 'consistency.json'), JSON.stringify({ target, screens: urls.map(local), signed_in_with: opened.mode !== 'none' ? opened.label : null, leads, inventory }, null, 2) + '\n');
+    writeFileSync(join(outDir, 'consistency.json'), JSON.stringify({ target, screens: urls.map(local), signed_in_with: opened.mode !== 'none' ? opened.label : null, dialogs_closed: dialogList(local), leads, inventory }, null, 2) + '\n');
     const md = ['# Design-system drift', '',
       `${urls.length} screen(s) at 1280 wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
       'The same kind of component should look the same on every screen. Every lead below goes in the pain map\'s **Script leads** table (C##): a pain ID (lens "L5 Consistency"), or Rejected with what you saw on the two crops. A different look can be on purpose (a search box on a dark panel): look before you decide.', '',
@@ -256,6 +257,7 @@ try {
       '', '## Inventory (signals for the taste pass, not leads)', '', '| Component | Looks | Screens | Each look |', '| --- | --- | --- | --- |',
       ...inventory.map(i => `| ${i.kind} | ${i.looks} | ${i.screens} | ${i.variants.map(v => `${say(v.look)} (${v.screens.length} screen${v.screens.length === 1 ? '' : 's'})`).join(' · ').replace(/\|/g, '/')} |`),
       '', 'A kind with more than 3 looks has no shared style to drift from. Judge it in the taste pass (T6 Surfaces, T9 Polish).'];
+    md.push(...dialogNote(local));
     writeFileSync(join(outDir, 'consistency.md'), md.join('\n') + '\n');
     console.log(`consistency: ${urls.length} screen(s), ${inventory.length} component kind(s), ${leads.length} lead(s) · ${outDir}`);
   }

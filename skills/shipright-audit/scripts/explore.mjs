@@ -89,7 +89,7 @@
 // format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
 // every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, normUrl, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, normUrl, uncover, dialogList, dialogNote, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -233,12 +233,19 @@ const FIND_TOGGLES = ([sel, layers, inLayer]) => {
   });
   return out;
 };
-const TOGGLE_STATE = ([sel, name]) => {
+// The switch that was just flipped, found again: the same element when it is still on the page (its
+// name may have changed with its state), else the one with the same name. It gets a mark of its own
+// for the click that turns it back. (Until 0.9 every flipped switch kept the same mark, so with 2 or
+// more switches on one page the click that should turn the second one back hit the first one.)
+const TOGGLE_STATE = ([sel, name, index]) => {
   const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
   const state = el => el.getAttribute('aria-checked') ?? el.getAttribute('aria-pressed') ?? (typeof el.checked === 'boolean' ? String(el.checked) : null) ?? (/^(checked|on)$/.test(el.dataset.state || '') ? 'true' : 'false');
-  const el = [...document.querySelectorAll(sel)].find(x => { const label = x.labels?.[0] || x.closest('label'); return (x.getAttribute('aria-label') || text(x) || (label && text(label)) || text(x.closest('li, [role=menuitem], tr, div') || x) || '').slice(0, 60) === name; });
+  const all = [...document.querySelectorAll(sel)];
+  const el = (index !== null && index !== undefined && all.find(x => x.dataset.srt === String(index)))
+    || all.find(x => { const label = x.labels?.[0] || x.closest('label'); return (x.getAttribute('aria-label') || text(x) || (label && text(label)) || text(x.closest('li, [role=menuitem], tr, div') || x) || '').slice(0, 60) === name; });
+  document.querySelectorAll('[data-srback]').forEach(x => { delete x.dataset.srback; });
   if (!el) return null;
-  el.dataset.srt = 'again';
+  el.dataset.srback = '1';
   return { state: state(el), clickLabel: !(el.getBoundingClientRect().width > 0) };
 };
 // Every piece of visible text on screen, with where it sits: inside a layer, near the message box, or elsewhere.
@@ -300,22 +307,42 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
     const outside = (a, b) => Object.entries(a.items).filter(([k, v]) => !v.layer && !v.toggle && (b.items[k]?.n || 0) < v.n).map(([, v]) => ({ text: v.text, near_message_box: v.near }));
     row.added = outside(after, before).slice(0, 8);
     row.removed = outside(before, after).slice(0, 8);
-    let now = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name]).catch(() => null);
+    // Read the switch again. If flipping closed the menu, open the menu again first.
+    const read = async (index = t.i) => {
+      let st = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name, index]).catch(() => null);
+      if (!st && reopen) { await reopen(); st = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name, index]).catch(() => null); }
+      return st;
+    };
+    const back = st => !!st && st.state === t.state;
+    let now = await read();
     row.after = now ? now.state : 'unknown (the menu closed)';
-    // Flip it back. If flipping closed the menu, open the menu again first.
-    if (!now && reopen) { await reopen(); now = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name]).catch(() => null); if (now) row.after = now.state; }
-    if (now && now.state !== t.state) {
-      await press('[data-srt="again"]', now.clickLabel);
+    row.back_after_reload = false;
+    if (now && !back(now)) {
+      // Turn it back, and read it again once the page has settled.
+      await press('[data-srback="1"]', now.clickLabel);
       await settle(page, { timeout: 4000 });
-      now = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name]).catch(() => null);
-      if (!now && reopen) { await reopen(); now = await page.evaluate(TOGGLE_STATE, [TOGGLES, t.name]).catch(() => null); }
+      now = await read();
+      // Still not back: a slow page may not have caught up. Wait once more, then try the click once more.
+      if (now && !back(now)) { await settle(page, { timeout: 3000 }); now = await read(); }
+      if (now && !back(now)) { await press('[data-srback="1"]', now.clickLabel); await settle(page, { timeout: 4000 }); now = await read(); }
     }
     row.final = now ? now.state : 'unknown';
-    row.restored = !!now && now.state === t.state;
-    if (!row.restored) lead('toggle-not-restored', `The switch "${t.name}"${opener ? ` in "${opener}"` : ''} could not be turned back: it was ${t.state === 'true' ? 'on' : 'off'} and is now ${row.final === 'true' ? 'on' : row.final === 'false' ? 'off' : 'in an unknown state'}. Tell the owner and list it in Left behind`, url, width, row.shots.after);
+    row.restored = back(now);
+    if (!row.restored) {
+      // Last try: some switches only reset when the page loads again. Reload and read.
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+      await settle(page, { timeout: 6000 });
+      if (reopen) await reopen();
+      await page.evaluate(FIND_TOGGLES, [TOGGLES, LAYERS, inLayer]).catch(() => []);
+      const after = await read(null);
+      if (back(after)) { row.back_after_reload = true; row.final = after.state; }
+      else if (after) row.final = after.state;
+    }
+    if (!row.restored && !row.back_after_reload) lead('toggle-not-restored', `The switch "${t.name}"${opener ? ` in "${opener}"` : ''} could not be turned back, by clicking it again or by loading the page again: it was ${t.state === 'true' ? 'on' : 'off'} and is now ${row.final === 'true' ? 'on' : row.final === 'false' ? 'off' : 'in an unknown state'}. Tell the owner and list it in Left behind`, url, width, row.shots.after);
     if (row.errors.length) lead('error-on-click', `Flipping "${t.name}" caused ${row.errors.length} error(s): ${row.errors[0]}`, url, width, row.shots.after);
-    // After a reopen the marks are stale: read the switches again so the next index still points right.
-    if (opener) await page.evaluate(FIND_TOGGLES, [TOGGLES, LAYERS, inLayer]).catch(() => []);
+    // The marks may be stale after a reopen or a reload: read the switches again so the next index still points right.
+    await page.evaluate(FIND_TOGGLES, [TOGGLES, LAYERS, inLayer]).catch(() => []);
+    await markControls();
   }
 }
 // ---- Back goes back ----------------------------------------------------------------------------
@@ -946,6 +973,7 @@ try {
       const routeId = (new URL(url).hash || new URL(url).pathname).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 30) || 'home';
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       await settle(page);
+      await uncover(page, 'explore'); // a "What's new" dialog over the page: Escape first, then X, then OK
       const controls = await page.evaluate((args) => {
         const [danger, opener, allow, isRemote, sel, lookName] = args;
         const D = new RegExp(danger, 'i'), O = new RegExp(opener, 'i'), L = new RegExp(lookName, 'i');
@@ -1146,6 +1174,19 @@ try {
   site.stop();
 }
 
+// Switches that did not turn back when clicked again, but were back after the page loaded again.
+// They are not left changed, so they are reported apart from "not turned back". One lead per place.
+const reloaded = new Map();
+for (const t of toggles.filter(x => x.flipped && x.back_after_reload)) {
+  const key = `${t.page}|${t.opener || '(page)'}`;
+  (reloaded.get(key) || reloaded.set(key, []).get(key)).push(t);
+}
+for (const list of reloaded.values()) {
+  const t = list[0], names = list.map(x => `"${x.switch}"`);
+  found.push({ kind: 'toggle-back-after-reload', what: `${list.length === 1 ? `The switch ${names[0]}` : `${list.length} switches (${names.slice(0, 6).join(', ')})`}${t.opener ? ` in "${t.opener}"` : ''} did not turn back when clicked again: ${list.length === 1 ? 'it was' : 'they were'} back only after the page loaded again. Nothing is left changed`,
+    page: urls.find(u => local(u) === t.page) || t.page, width: t.width, shot: t.shots.after, group: `toggle-reload|${t.opener || '(page)'}`, detail: { switches: list.map(x => x.switch) } });
+}
+
 // A switch that adds something visible away from itself. In a menu, anything new on the page behind it
 // counts. For a switch on the page, only something new next to the message box counts (a filter that
 // shows more rows is doing its job). Several switches behind one opener that all do it are one lead.
@@ -1194,7 +1235,7 @@ const merged = mergeLeads(found.map((f, i) => ({ ...f, id: `E${i}` })), widths, 
 merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name', 'back-goes-elsewhere'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
 const heldSwitches = toggles.filter(t => t.held_by);
 const picked = optionRows.filter(r => r.picks.length);
-const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch),
+const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, back_after_reload: flipped.filter(t => !t.restored && t.back_after_reload).map(t => t.switch), not_turned_back: flipped.filter(t => !t.restored && !t.back_after_reload).map(t => t.switch),
   // Option picks count as actions only when they ran on the owner's yes (--use). Without it they ran signed out.
   option_controls_used: picked.length, option_picks: USE ? picked.reduce((a, r) => a + r.picks.length, 0) : 0, options_not_put_back: picked.filter(r => r.restored === false && !r.back_after_reload).map(r => r.control), options_back_after_reload: picked.filter(r => r.restored === false && r.back_after_reload).map(r => r.control),
   limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action), held_switches: heldSwitches.map(t => ({ switch: t.switch, page: t.page, held_by: t.held_by })) } : null };
@@ -1203,7 +1244,7 @@ const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
 const notClicked = unique.filter(r => /^not clicked/.test(r.result || ''));
 const totals = { controls: unique.length, clicked: unique.filter(wasClicked).length, opened_something: openedCount, did_nothing: unique.filter(r => r.result === 'nothing visible happened').length, not_clicked: notClicked.length, caused_errors: unique.filter(r => r.errors.length).length };
-writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, options: optionRows, fields: fieldRows, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
+writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, options: optionRows, fields: fieldRows, dialogs_closed: dialogList(local), back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
 const md = ['# Explore: every safe control', '',
   `${totals.controls} control(s) at ${widths.join(' and ')} wide: ${totals.opened_something} opened something, ${totals.did_nothing} did nothing visible, ${totals.not_clicked} not clicked, ${totals.caused_errors} caused errors.`, '',
   `For the pain map header: **Controls opened: ${totals.clicked} of ${totals.controls}**`, '',
@@ -1211,10 +1252,10 @@ const md = ['# Explore: every safe control', '',
   '## Leads', '', '| Lead | Check | What it found | Widths | Pages |', '| --- | --- | --- | --- | --- |',
   ...(merged.length ? merged.map(l => `| ${l.id} | ${l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.widths.join(', ')} | ${l.pages.join(', ')} |`) : ['| none | | | | |']),
   ...(USE ? ['', '## Used as a user: switches flipped and turned back', '',
-    `${use.switches_flipped} of ${use.switches_found} switch(es) flipped, ${use.turned_back} turned back.${use.not_turned_back.length ? ` **Not turned back: ${use.not_turned_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''} Count each flipped switch as one action in the header's "Used as a user: yes (N actions)".`, '',
+    `${use.switches_flipped} of ${use.switches_found} switch(es) flipped, ${use.turned_back} turned back.${use.back_after_reload.length ? ` Back after reload (clicking again did not turn them back, loading the page again did): ${use.back_after_reload.join(', ')}.` : ''}${use.not_turned_back.length ? ` **Not back: ${use.not_turned_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''} Count each flipped switch as one action in the header's "Used as a user: yes (N actions)".`, '',
     ...(limits ? [`The owner's limits (${limits.file}): "${limits.owner_words}". Held and not flipped: ${heldSwitches.length ? [...new Set(heldSwitches.map(t => `"${t.switch}" (${t.held_by})`))].join(', ') : 'no switch matched a held action'}. Name what was held in Not verified.`, ''] : []),
     '| Page | Opened from | Switch | Was | Flipped to | Ends | What appeared away from the switch | Before | After |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
-    ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : `NOT RESTORED (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
+    ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : t.back_after_reload ? 'back after reload' : `NOT BACK (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
     : ['', '## Switches', '', 'Not flipped. Flipping switches needs the owner\'s yes to "use the app like a real user" (then run this again with `--use`). Until then, write in Not verified: "How features behave when used (switches, sending, results)".']),
   '', '## Option controls', '', ...(optionRows.length ? [`${PICK ? (USE ? 'Picked with the owner\'s yes' : 'Picked because the run was not signed in (nothing is saved to an account)') : 'Not picked'}: each option of a theme switcher, view toggle or segmented control in turn, then the first state again. An option that can no longer be picked afterwards is an option-vanished lead.${USE && picked.length ? ` Count each pick as one action in the header's "Used as a user" count (${use.option_picks} picks).` : ''}${use.options_not_put_back.length ? ` **Not put back: ${use.options_not_put_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''}${use.options_back_after_reload.length ? ` Back only after a reload: ${use.options_back_after_reload.join(', ')}.` : ''}`, '',
     '| Page | Control | Kind | Options at first | Was on | After each pick | Vanished | Ends |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
@@ -1228,5 +1269,6 @@ const md = ['# Explore: every safe control', '',
     : ['No group of tabs or linked sub-pages was found.']),
   '', '## Controls', '', '| Page | Width | Control | Icon only | Tooltip | What happened | Errors | Screenshot |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ...rows.map(r => `| ${r.page} | ${r.width} | ${r.control.replace(/\|/g, '/')} | ${r.icon_only ? 'yes' : ''} | ${r.tooltip || (r.icon_only && r.width > 500 ? 'none' : '')} | ${(r.result || '').replace(/\|/g, '/')} | ${r.errors.join('; ').replace(/\|/g, '/')} | ${r.shot || ''} |`)];
+md.push(...dialogNote(local));
 writeFileSync(join(outDir, 'explore.md'), md.join('\n') + '\n');
-console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped and ${use.turned_back} turned back` : ''}${limits ? `, ${heldSwitches.length} held by the owner's limits` : ''} · ${outDir}`);
+console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped, ${use.turned_back} turned back${use.back_after_reload.length ? `, ${use.back_after_reload.length} back after reload` : ''}${use.not_turned_back.length ? `, ${use.not_turned_back.length} NOT BACK` : ''}` : ''}${limits ? `, ${heldSwitches.length} held by the owner's limits` : ''} · ${outDir}`);

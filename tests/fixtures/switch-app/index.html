@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Inbox</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; }
+.filters { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+.filters span { display: inline-flex; align-items: center; gap: 8px; }
+[role=switch] { width: 44px; height: 24px; border: 1px solid #55554f; border-radius: 999px; background: #fff; padding: 0; }
+[role=switch][aria-checked=true] { background: #1a56db; }
+li { padding: 8px 0; border-bottom: 1px solid #ccc; }
+</style></head>
+<body>
+<main>
+  <h1>Inbox</h1>
+  <div class="filters">
+    <span><button role="switch" aria-checked="false" aria-label="Show drafts" data-kind="plain"></button> Show drafts</span>
+    <span><button role="switch" aria-checked="false" aria-label="Show finished" data-kind="plain"></button> Show finished</span>
+    <span><button role="switch" aria-checked="false" aria-label="Compact rows" data-kind="plain"></button> Compact rows</span>
+    <span><button role="switch" aria-checked="false" aria-label="Live preview" data-kind="once"></button> Live preview</span>
+    <span><button role="switch" aria-checked="false" aria-label="Beta layout" data-kind="kept"></button> Beta layout</span>
+  </div>
+  <ul><li>Quarterly numbers</li><li>Welcome pack</li><li>Venue options</li></ul>
+</main>
+<script>
+  const tell = what => fetch('/api/' + what, { method: 'POST' }).catch(() => {});
+  document.querySelectorAll('[role=switch]').forEach(b => {
+    if (b.dataset.kind === 'kept' && localStorage.getItem('beta') === 'on') b.setAttribute('aria-checked', 'true');
+    b.onclick = () => {
+      const on = b.getAttribute('aria-checked') === 'true';
+      if (on && b.dataset.kind !== 'plain') return;
+      b.setAttribute('aria-checked', String(!on));
+      if (b.dataset.kind === 'kept') localStorage.setItem('beta', 'on');
+      tell('flip=' + encodeURIComponent(b.getAttribute('aria-label')) + ':' + (!on ? 'on' : 'off'));
+    };
+  });
+</script>
+</body>
+</html>

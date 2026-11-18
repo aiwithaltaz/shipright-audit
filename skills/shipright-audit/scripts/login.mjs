@@ -126,6 +126,9 @@ if (ok) {
   console.log('login: the profile always holds the newest sign-in. The session file is the fallback: apps that swap their sign-in token make it stale within seconds.');
   console.log('login: both hold your login cookies. Keep them out of git and delete them after the audit.');
 }
+// Let any token request that is still in flight finish before the window closes: an answer that never
+// arrives would leave the profile with a dead token.
+await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
 await context.close().catch(() => {});
 if (!ok) {
   console.error(closed
