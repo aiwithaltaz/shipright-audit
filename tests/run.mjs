@@ -76,10 +76,15 @@ if (hasPw) {
   const nout = mkdtempSync(join(tmpdir(), 'visual-noise-'));
   run(['skills/shipright-audit/scripts/visual.mjs', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', '--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports', '--out', nout]);
   busy = JSON.parse(readFileSync(join(nout, 'visual.json'), 'utf8'));
-  const noise = busy.findings.filter(f => f.width === 1280).length;
+  // One lead on this app is real and listed: the answer key says Reports shows lorem ipsum, and the
+  // template-text check (new in 0.8) finds it. Everything else must stay quiet.
+  const listed = l => l.kind === 'template-text' && /lorem ipsum/i.test(l.what);
+  const noise = busy.findings.filter(f => f.width === 1280 && !listed(f)).length;
   ok('visual checker: no false alarms on 7 busy screens', noise === 0, `${noise} lead(s)`);
-  // At 390 the only lead is the one the answer key lists for this app: tables wider than a phone screen.
-  const phoneLeads = busy.leads.filter(l => l.widths.includes(390));
+  const lorem = busy.leads.filter(listed);
+  ok('visual checker finds the placeholder text the answer key lists on Reports', lorem.length === 1 && lorem[0].pages.join() === '/index.html#/reports', lorem.map(l => l.pages.join()).join(' | ') || 'not found');
+  // At 390 the only other lead is the one the answer key lists for this app: tables wider than a phone screen.
+  const phoneLeads = busy.leads.filter(l => l.widths.includes(390) && !listed(l));
   ok('visual checker at 390: only the sideways tables the answer key lists', phoneLeads.length === 1 && phoneLeads[0].kind === 'clipped-text' && phoneLeads[0].detail.how === 'screen' && phoneLeads[0].pages.every(p => /#\/(shifts|volunteers)$/.test(p)), phoneLeads.map(l => `${l.kind} on ${l.pages.join(', ')}`).join(' | ') || 'none');
   // 8b. Clipped text: a reply footer cut off at 390 and fine at 1280 is one lead, at 390 only.
   // The same page holds things that must not be flagged: long chat titles shortened in a list, a row
@@ -310,7 +315,7 @@ if (hasPw) {
   ok('reduced motion: a menu that still slides in is a lead', motionLead.length === 1 && /After opening "Menu"/.test(motionLead[0].what) && /transform/.test(motionLead[0].what), motionLead.map(l => l.what.slice(0, 90)).join(' | ') || 'no lead');
   // No false alarms from the new checks on the fixtures that were not built for them, or on a busy app.
   const loud = [];
-  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded'];
+  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded', 'marker-no-filter'];
   for (const f of ['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app']) {
     const o1 = mkdtempSync(join(tmpdir(), 'fa-v-')), o2 = mkdtempSync(join(tmpdir(), 'fa-e-')), o3 = mkdtempSync(join(tmpdir(), 'fa-k-'));
     run([S7 + 'visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o1]);
@@ -326,6 +331,14 @@ if (hasPw) {
   const busyNew = busy.leads.filter(l => NEW.includes(l.kind));
   if (busyNew.length) loud.push(`busy app (visual): ${busyNew.map(l => l.kind).join(', ')}`);
   ok('drift, layout shift and reduced motion: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
+}
+
+// 20. Everything added in 0.8 (tests/v08.mjs): the use-it answer and its limits, signin.json, items opened
+// through buttons, ShipRight's own files never read as the owner's rules, the 5 new page checks, markers
+// with no filter, item lifecycles, and Create and Add buttons on a live app.
+{
+  const { run08 } = await import('./v08.mjs');
+  await run08(ok, { hasPw });
 }
 
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)

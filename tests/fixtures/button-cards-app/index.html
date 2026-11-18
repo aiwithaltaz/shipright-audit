@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Projects</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 960px; margin: 0 auto; padding: 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.card { border: 1px solid #d0d0d0; border-radius: 10px; padding: 16px; }
+.card h2 { font-size: 18px; margin: 0 0 6px; }
+.card p { margin: 0 0 12px; color: #444; }
+.acts { display: flex; gap: 8px; }
+.acts button { padding: 8px 12px; border: 1px solid #888; border-radius: 8px; background: #fff; font: inherit; }
+dialog { border: 1px solid #bbb; border-radius: 10px; padding: 24px; max-width: 90vw; }
+#panel { margin-top: 24px; border: 1px solid #d0d0d0; border-radius: 10px; padding: 16px; }
+</style></head>
+<body>
+<main>
+  <h1>Projects</h1>
+  <div class="grid">
+    <article class="card"><h2>Spring launch</h2><p>12 tasks, due in May.</p><div class="acts"><button type="button" data-do="view">View</button><button type="button" data-do="edit">Edit</button></div></article>
+    <article class="card"><h2>Budget review</h2><p>4 tasks, waiting on finance.</p><div class="acts"><button type="button" data-do="review">Review</button><button type="button" data-do="edit">Edit</button></div></article>
+    <article class="card"><h2>Team offsite</h2><p>9 tasks, venue booked.</p><div class="acts"><button type="button" data-do="open">Open</button><button type="button" data-do="edit">Edit</button></div></article>
+  </div>
+  <section id="panel" hidden><h2>Team offsite</h2><p>Venue booked for the second week of June. Nine tasks are open, and three people still need travel.</p></section>
+</main>
+<dialog id="dlg"><h2>Spring launch</h2><p>Twelve tasks. The next one is the press list, due on Friday.</p><button type="button" id="close">Close</button></dialog>
+<script>
+  const tell = what => fetch('/api/' + what, { method: 'POST' }).catch(() => {});
+  document.querySelector('.grid').addEventListener('click', e => {
+    const what = e.target.dataset.do;
+    if (!what) return;
+    tell(what);
+    if (what === 'view') document.getElementById('dlg').showModal();
+    if (what === 'open') document.getElementById('panel').hidden = false;
+    if (what === 'edit') e.target.closest('.card').querySelector('p').textContent = 'Saved a change.';
+  });
+  document.getElementById('close').onclick = () => document.getElementById('dlg').close();
+</script>
+</body>
+</html>

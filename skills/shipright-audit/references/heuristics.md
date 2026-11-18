@@ -4,7 +4,7 @@ Use in Step 4 (pass 2). Check every screen in scope against each item. Name the 
 
 Contents:
 - Part A: The 10 usability heuristics (H1 to H10)
-- Part B: ShipRight lenses (L1 to L9)
+- Part B: ShipRight lenses (L1 to L10)
 
 ## Part A: The 10 usability heuristics
 
@@ -106,3 +106,10 @@ Pain example: the only explanation of "family plan" is buried on the FAQ page.
 **L9. Job fit.**
 - Does the product support the user's real job end to end, or only part of it?
 - Is there a step users must do outside the app (a spreadsheet, a phone call) that the app should cover?
+
+**L10. Item lifecycle.** Use in Step 2b. For each main item type (a project, an order, a booking, a draft), list every state it can be in and the actions it offers in each. Then ask of each state:
+- Q1. Is there exactly one clear next step?
+- Q2. Does leaving an unfinished item offer a way back in ("Continue editing")?
+- Q3. Are final actions (Publish, Pay, Send) only offered once the item is ready?
+- Q4. Does a failed state say why and how to fix it?
+- A state that fails a question is a pain with the lens "L10: Q#". Never judge an item's buttons before its states are mapped: "the buttons fit" can be true for a finished item and false for one still being edited.

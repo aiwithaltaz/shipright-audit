@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace</title>
+<link rel="stylesheet" href="base.css">
+<style>
+header, footer { border-bottom: 1px solid #c9c9c9; padding: 12px 24px; display: flex; gap: 16px; align-items: center; }
+footer { border-bottom: 0; border-top: 1px solid #c9c9c9; }
+header a, footer a { color: #1c1c1c; }
+.row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; }
+[role=tablist] { display: flex; gap: 8px; }
+[role=tab] { padding: 8px 14px; border: 1px solid #777; border-radius: 8px; background: #fff; font: inherit; }
+.icon-btn { width: 40px; height: 40px; border: 1px solid #777; border-radius: 8px; background: #fff; display: inline-flex; align-items: center; justify-content: center; color: #333; }
+.icon-btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; }
+.icon-btn[disabled] { color: #d6d6d6; }
+.hero { background: linear-gradient(90deg, #f3f3f3, #ffffff); padding: 12px; border-radius: 10px; margin-bottom: 16px; display: flex; gap: 8px; align-items: center; }
+.hero svg { width: 20px; height: 20px; fill: none; stroke: #e0e0e0; stroke-width: 2; }
+.list .card { position: relative; margin-bottom: 12px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.dot { position: absolute; top: -8px; right: -8px; width: 18px; height: 18px; border-radius: 999px; background: #1c3a7a; color: #fff; font-size: 11px; line-height: 18px; text-align: center; padding: 0; }
+pre { background: #f3f3f3; padding: 12px; border-radius: 8px; overflow-x: auto; }
+</style></head>
+<body>
+<header><nav aria-label="Main"><a href="#/projects">Projects</a> <a href="#/reports">Reports</a> <a href="#/team">Team</a></nav></header>
+<main>
+  <nav aria-label="Breadcrumb"><a href="#/projects">Projects</a> / Workspace</nav>
+  <h1>Workspace</h1>
+  <div class="hero"><svg viewBox="0 0 24 24"><path d="M12 3l9 18H3z"/></svg><span>Two reports are due this week.</span></div>
+  <div class="row">
+    <div role="tablist" aria-label="Status"><button type="button" role="tab" aria-selected="true">All</button><button type="button" role="tab" aria-selected="false">Open</button><button type="button" role="tab" aria-selected="false">Done</button></div>
+    <input type="search" aria-label="Search" placeholder="Search [name or tag]" style="width: 220px">
+    <select aria-label="Sort by" style="width: 140px"><option>Newest first</option><option>Oldest first</option></select>
+    <button type="button" class="icon-btn" aria-label="Show as grid"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg></button>
+    <button type="button" class="icon-btn" aria-label="Undo" disabled><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h10a6 6 0 010 12h-3"/></svg></button>
+  </div>
+  <div class="list">
+    <div class="card"><span class="chip dot">3</span><h2>Spring launch</h2><p>Every project in this list uses the standard review steps before it ships.</p><div class="chips"><span class="chip">Marketing</span><span class="chip">Due in May</span><span class="chip">Needs review</span><span class="chip">High priority</span></div></div>
+    <div class="card"><h2>Budget review</h2><p>Every project in this list uses the standard review steps before it ships.</p><div class="chips"><span class="chip">Finance</span><span class="chip">Due in June</span></div></div>
+    <div class="card"><h2>Team offsite</h2><p>Venue booked, travel still open. Phone (optional) goes on the form.</p><div class="chips"><span class="chip">People</span></div></div>
+  </div>
+  <h2>Script notes</h2>
+  <p>[Hook] Start with the question people ask most. [Verse 2] comes after the break.</p>
+  <h2>TODO</h2>
+  <p>Press <kbd>[Esc]</kbd> to close a dialog. The value may be null and void if the form is empty when it is sent to the server for checking.</p>
+  <pre><code>const title = `Hello {name}, you have ${count} new [items]`; // TODO: undefined is NaN here, %s</code></pre>
+  <textarea aria-label="Draft" rows="2" cols="40">Dear {first_name}, thanks for [reason].</textarea>
+</main>
+<footer><nav aria-label="Footer"><a href="#/projects">Projects</a> <a href="#/reports">Reports</a> <a href="#/team">Team</a></nav></footer>
+</body>
+</html>

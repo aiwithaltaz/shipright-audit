@@ -2,9 +2,11 @@
 // Open every safe control on each page, the way a curious first-time user would, and record what happens.
 // Audits miss what they never open: a dialog behind an icon, a button that does nothing, a feature that
 // throws an error the moment you touch it. This finds them.
-// Usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes "#/,/settings"]
-//        [--widths 1280,390] [--profile dir] [--session session.json] [--out dir] [--max 40]
-//        [--allow "Bookmark,Handoff"]
+// Usage: node <skill>/scripts/explore.mjs <index.html|url> --audit <audit> [--use] [--routes "#/,/settings"]
+//        [--widths 1280,390] [--max 40] [--allow "Bookmark,Handoff"]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit: this audit's folder. It reads the sign-in from <audit>/signin.json and the screens from
+// <audit>/screens/crawl.json, and writes to <audit>/explore.
 // --widths: both 1280 and 390 run by default. At the first width every control is explored. At the next
 // widths it explores the controls that only exist there (a phone menu button, a bottom bar) and opens
 // again whatever opened a dialog, menu or panel, so each one is also seen and screenshotted on phone.
@@ -14,15 +16,24 @@
 //     (layout shift over 0.1), that is a lead.
 //   - Reduced motion: once per page it switches the browser to "reduce motion", loads the page again
 //     and opens one menu. Anything that still slides, zooms or spins without need is a lead.
+// It also checks, without clicking anything:
+//   - Markers with no filter: when the items of a list carry a marker control (star, favorite, like,
+//     pin, bookmark, save, flag), the same screen should offer a way to see only the marked items: a
+//     filter, tab, chip, link or sort option using the same word ("Starred", "Favorites", "Pinned",
+//     "Saved", "Flagged"). The menus this script opens count too. If there is none, that is a
+//     "marker-no-filter" lead: "You can star items but not see only starred items."
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
 // (a dialog, menu, panel, new page, file picker, a change on the page, or nothing), console and network
 // errors caused by the click, and a screenshot when something opened. Then it puts the page back.
 // Safety on live apps (http/https): it only clicks controls that open something (menus, tabs, pop-ups) or
-// whose name says so (open, menu, more, settings, filter, model, attach, add, new, create, search...),
+// whose name says so (open, menu, more, settings, filter, model, attach, search...),
 // never risky words (delete, send, publish, generate, save, pay, like, pin, regenerate... see DANGER in
 // browser.mjs) and never form submit buttons. Everything else is listed as "not clicked" for you to judge.
+// A button named create, add or new is clicked only when it shows that it opens something
+// (aria-haspopup, aria-expanded, or it is a link to a new page) or the owner allowed it (--allow, or
+// "allow_controls" in use-limits.json). Otherwise it is held: "could create an item".
 // --allow names extra controls the owner said yes to. Icon-only controls are always hovered, never
 // clicked unless they have a safe name. File pickers and browser dialogs are cancelled.
 // Switches (role=switch, checkboxes, aria-pressed buttons) are never flipped, unless you pass --use.
@@ -33,23 +44,31 @@
 // "toggle-side-effect" lead. It never flips switches on settings or account pages, or ones with risky
 // or account-wide names (notifications, billing, privacy, sharing...), or ones that change one of the user's
 // items (a checkbox on every row of a list, a bookmark): those need their own yes.
+// The owner's limits: when the owner said "yes, but ...", the audit writes <audit>/use-limits.json (the
+// format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
+// every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--max', '--allow', '--widths', '--limits', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--widths 1280,390] [--profile dir] [--session file] [--out dir] [--max 40] [--allow "Label,Label"]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'explore'));
+if (!target) { console.error('usage: node <skill>/scripts/explore.mjs <index.html|url> --audit <audit folder> [--use] [--routes ...] [--widths 1280,390] [--max 40] [--allow "Label,Label"] [--crawl crawl.json] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
+const paths = auditPaths(args, 'explore');
+const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
-const { session, profile } = signInFlags(args, 'explore');
+const { session, profile, landed } = signInFlags(args, 'explore');
 const MAX = Number(flag('--max') || 40);
-const allow = (flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const ownerLimits = useLimits(args, outDir, 'explore');
+// Controls the owner said may be clicked: --allow, and "allow_controls" in use-limits.json.
+const allow = [...(flag('--allow') || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean), ...(ownerLimits ? ownerLimits.allow_controls : [])];
 const widths = widthsFlag(args);
 const USE = args.includes('--use');
+// What the owner ruled out when they said yes with limits. Only read with --use.
+const limits = USE ? ownerLimits : null;
 const MAX_FLIPS = 12; // per page
 const OPENER = /\b(open|menu|more|options|settings|preferences|filter|sort|view|show|details|info|help|select|choose|picker|model|attach|tools|add|new|create|expand|collapse|sidebar|panel|search|budget|usage|context|account|profile|switch|tab|history|notifications?|microphone|voice|dictat\w*|speech|help)\b/i;
 const CONTROLS = 'button, [role=button], [role=tab], summary, [aria-haspopup]:not(a)';
@@ -62,6 +81,55 @@ const ACCOUNT_NAME = /notif|e-?mail|sms|billing|subscri|renew|two-factor|2fa|pri
 // Switches that change one of the user's items (a task ticked off, a bookmark), not how the screen works. Never flipped.
 const ITEM_ACTION = /bookmark|mute|block|watch|up-?vote|down-?vote|react|complete|\bdone\b|resolve|\bhide\b|snooze|\bread\b|unread|\block\b|select (all|row|item)/i;
 
+// Markers on list items, and whether the screen offers a way to see only the marked ones. No clicking.
+const MARKERS = () => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  // A marker and the words a filter for it would use. Star, favorite and like are one family: an app
+  // that stars items and has a "Favorites" tab is fine.
+  const FAMILIES = [
+    { id: 'star', mark: /\b(un)?star(red|s)?\b|\b(un)?favou?rite[sd]?\b|\bfaves?\b|\bheart\b|\b(un)?like[sd]?\b/i, filter: /\bstarred\b|\bstars\b|\bfavou?rite[sd]?\b|\bfaves?\b|\bliked?\b|\blikes\b|\bloved\b/i,
+      words: n => /favou?rite|fave/i.test(n) ? ['favorite', 'favorite'] : /like/i.test(n) ? ['like', 'liked'] : /heart/i.test(n) && !/star/i.test(n) ? ['favorite', 'favorite'] : ['star', 'starred'] },
+    { id: 'pin', mark: /\b(un)?pin(ned|s)?\b/i, filter: /\bpinned\b|\bpins\b/i, words: () => ['pin', 'pinned'] },
+    { id: 'bookmark', mark: /\b(un)?bookmark(ed|s)?\b|\bsave for later\b|\b(read|watch) later\b|^(un)?saved?$/i, filter: /\bbookmark(ed|s)?\b|\bsaved\b|\breading list\b|\b(read|watch) later\b/i, words: n => /bookmark/i.test(n) ? ['bookmark', 'bookmarked'] : ['save', 'saved'] },
+    { id: 'flag', mark: /\b(un)?flag(ged|s)?\b/i, filter: /\bflagged\b|\bflags\b/i, words: () => ['flag', 'flagged'] },
+  ];
+  // What a control says it is: its words, its label for screen readers, or the name of its icon.
+  const nameOf = el => {
+    const said = (el.getAttribute('aria-label') || el.getAttribute('title') || text(el) || '').trim();
+    if (said) return said.slice(0, 40);
+    const icon = el.querySelector('svg, i, use, [data-icon]');
+    const hint = [el.getAttribute('data-icon'), icon && icon.getAttribute('data-icon'), icon && (icon.getAttribute('class') || ''), icon && (icon.getAttribute('href') || icon.getAttribute('xlink:href') || ''), el.querySelector('use') && (el.querySelector('use').getAttribute('href') || '')].filter(Boolean).join(' ');
+    return hint.replace(/[#_.-]+/g, ' ').replace(/\b(icon|icons|lucide|fa|fas|far|bi|ri|mdi|feather|outline|solid|fill|line)\b/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  };
+  const controls = [...document.querySelectorAll('button, [role=button], [role=switch], [role=checkbox], input[type=checkbox]')].filter(el => vis(el) && !(el.type === 'submit' && el.closest('form')) && !el.closest('nav, header, footer, [role=menu], [role=dialog], dialog, [role=toolbar]'));
+  const out = [];
+  for (const fam of FAMILIES) {
+    const marked = controls.map(el => ({ el, name: nameOf(el) })).filter(c => c.name && fam.mark.test(c.name) && !/\b(all|changes|draft|settings|as|and|new|filter|show|only)\b/i.test(c.name));
+    if (marked.length < 2) continue;
+    // The item each marker sits on: the nearest ancestor with a same-tag sibling that also holds one.
+    const holds = el => marked.some(m => el.contains(m.el));
+    const items = new Set();
+    for (const m of marked) {
+      for (let x = m.el.parentElement; x && x !== document.body; x = x.parentElement) {
+        if (!x.parentElement) break;
+        if ([...x.parentElement.children].some(sib => sib !== x && sib.tagName === x.tagName && holds(sib))) { items.add(x); break; }
+      }
+    }
+    if (items.size < 2) continue;
+    const inItem = el => [...items].some(i => i.contains(el));
+    const offers = [...document.querySelectorAll('[role=tab], [role=option], option, [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox], [role=radio], a, button, [role=button], label, summary, h1, h2, h3, h4, h5, h6, [class*=chip i], [class*=filter i]')]
+      .filter(el => !inItem(el) && (el.tagName === 'OPTION' || vis(el)))
+      .map(el => (el.getAttribute('aria-label') || text(el) || '').slice(0, 60)).filter(Boolean);
+    const offer = offers.find(t => fam.filter.test(t)) || null;
+    const [verb, done] = fam.words(marked[0].name);
+    const first = [...items][0];
+    first.parentElement.dataset.srmark = fam.id;
+    out.push({ family: fam.id, verb, done, filter: fam.filter.source, items: items.size, control: marked[0].name, offer });
+  }
+  return out;
+};
+
 // What is open right now: dialogs, menus, pop-overs, the URL and how much text the page shows.
 const STATE = () => {
   const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 20 && r.height > 20 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
@@ -72,7 +140,7 @@ const STATE = () => {
 
 const site = await openTarget(target, 'explore');
 const remote = site.remote;
-const ctx = await openContext({ session, profile, name: 'explore', url: site.startUrl, viewport: viewportFor(widths[0]) });
+const ctx = await openContext({ session, profile, name: 'explore', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = ctx.page;
 let errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
@@ -83,7 +151,7 @@ let picker = false;
 page.on('filechooser', () => { picker = true; }); // listening stops the real picker from opening
 page.on('dialog', d => d.dismiss().catch(() => {}));
 
-const urls = pagesToVisit({ startUrl: site.startUrl, remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'explore' });
+const urls = pagesToVisit({ startUrl: site.startUrl, remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'explore' });
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
 const rows = [], found = [];
 let shotN = 0;
@@ -152,7 +220,9 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
   for (const t of list) {
     const row = { page: local(url), width, opener: opener || null, switch: t.name, before: t.state, after: null, final: null, restored: null, flipped: false, added: [], removed: [], url_changed: false, errors: [], shots: {}, skipped: null };
     toggles.push(row);
-    if (DANGER.test(t.name)) row.skipped = 'risky word';
+    const ruledOut = heldBy(limits, t.name);
+    if (ruledOut) { row.skipped = `held: the owner ruled this out ("${ruledOut.action}")`; row.held_by = ruledOut.action; }
+    else if (DANGER.test(t.name)) row.skipped = 'risky word';
     else if (ACCOUNT_NAME.test(t.name)) row.skipped = 'an account-wide setting: needs its own yes';
     else if (t.perItem || ITEM_ACTION.test(t.name)) row.skipped = 'changes one of the user\'s items, not a setting: needs its own yes';
     else if (ACCOUNT_PLACE.test(where) || ACCOUNT_PLACE.test(t.place) || ACCOUNT_PLACE.test(opener || '')) row.skipped = 'on a settings or account screen: needs its own yes';
@@ -226,12 +296,18 @@ try {
           const iconOnly = !wordy;
           const submit = (el.type === 'submit' && !!el.closest('form')) || false;
           const opens = el.hasAttribute('aria-haspopup') || el.hasAttribute('aria-expanded') || el.getAttribute('role') === 'tab' || el.tagName === 'SUMMARY';
+          // "Create", "Add" and "New" may open a form, or may make the item at once. On a live app only
+          // the ones that show they open something are safe: a pop-up, or a link to a new page.
+          const makes = /\b(create|add|new)\b/i.test(name);
+          const link = el.closest('a[href]');
+          const showsItOpens = (el.hasAttribute('aria-haspopup') && el.getAttribute('aria-haspopup') !== 'false') || el.hasAttribute('aria-expanded') || el.tagName === 'SUMMARY' || (!!link && !/^(#|javascript:|)$/i.test((link.getAttribute('href') || '').trim()));
           const allowed = allow.some(a => name.toLowerCase().includes(a));
           const toggle = el.matches('[role=switch], [role=checkbox], [role=menuitemcheckbox], [aria-pressed], [aria-checked]');
           let click = true, why = '';
           if (toggle) { click = false; why = 'a switch: flipped only with the owner\'s yes (--use)'; }
           else if (D.test(name) && !allowed) { click = false; why = 'risky word'; }
           else if (submit && !allowed) { click = false; why = 'submits a form'; }
+          else if (isRemote && makes && !allowed && !showsItOpens) { click = false; why = 'could create an item'; }
           else if (isRemote && !allowed && !opens && !O.test(name)) { click = false; why = name ? 'could change data' : 'no name, unknown effect'; }
           const r = el.getBoundingClientRect();
           out.push({ i, name: name || '(no name)', iconOnly, hasName: !!name, click, why, y: Math.round(r.top) });
@@ -239,6 +315,10 @@ try {
         return out;
       }, [DANGER.source, OPENER.source, allow, remote, CONTROLS]);
 
+      // Markers on list items (star, pin, bookmark...), read before anything is opened. Whether a
+      // filter for them exists is decided after the menus on this page have been opened and read.
+      const markers = firstWidth ? await page.evaluate(MARKERS).catch(() => []) : [];
+      const layerTexts = [];
       let clicked = 0, motionOpener = null;
       for (const c of controls) {
         const key = `${c.name}|${c.iconOnly}`;
@@ -289,6 +369,7 @@ try {
         // Look inside what opened: is any of its text cut off at this width? And did the page behind a
         // menu or dialog jump when it opened? (An accordion or a tab is meant to move the page.)
         if (newOpen.length && !picker) {
+          layerTexts.push(await page.evaluate(sel => [...document.querySelectorAll(sel)].map(e => e.innerText || '').join('\n'), LAYERS).catch(() => ''));
           const overlay = newOpen.some(o => /^(dialog|alertdialog|menu|listbox):/.test(o));
           const inside = await page.evaluate(analyzeScript({ within: LAYERS, only: ['clipped-text', 'layout-shift'], shiftWithInput: true })).catch(() => ({ findings: [] }));
           for (const f of inside.findings) {
@@ -320,6 +401,13 @@ try {
           await settle(page, { timeout: 6000 });
           await markControls(); // data-sre marks are gone after a reload: mark again in the same order
         }
+      }
+      // A marker you can set should be filterable: a star with no "Starred" filter, tab, chip or sort option.
+      for (const m of markers) {
+        if (m.offer || layerTexts.some(t => new RegExp(m.filter, 'i').test(t))) continue;
+        const shot = `E${String(++shotN).padStart(3, '0')}-${routeId}-marker-${m.family}.png`;
+        const ok = await page.locator(`[data-srmark="${m.family}"]`).first().screenshot({ path: join(outDir, shot), timeout: 4000 }).then(() => true).catch(() => page.screenshot({ path: join(outDir, shot) }).then(() => true).catch(() => false));
+        lead('marker-no-filter', `You can ${m.verb} items but not see only ${m.done} items. ${m.items} items on this screen carry a "${m.control}" control, and no filter, tab, chip or sort option on it uses that word`, url, width, ok ? shot : null, { group: `marker|${m.family}`, detail: { marker: m.control, items: m.items, family: m.family } });
       }
       // With the owner's yes: the switches that sit on the page itself.
       if (USE && firstWidth) await flipToggles({ url, width, routeId, opener: null, reopen: null });
@@ -379,7 +467,9 @@ for (const g of sideEffects.values()) {
 // the first width a control is seen, so they do not say "at 1280 only".
 const merged = mergeLeads(found.map((f, i) => ({ ...f, id: `E${i}` })), widths, local);
 merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
-const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch) };
+const heldSwitches = toggles.filter(t => t.held_by);
+const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch),
+  limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action), held_switches: heldSwitches.map(t => ({ switch: t.switch, page: t.page, held_by: t.held_by })) } : null };
 const unique = [...explored.values()];
 const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
@@ -394,10 +484,11 @@ const md = ['# Explore: every safe control', '',
   ...(merged.length ? merged.map(l => `| ${l.id} | ${l.kind} | ${l.what.replace(/\|/g, '/')} | ${l.widths.join(', ')} | ${l.pages.join(', ')} |`) : ['| none | | | | |']),
   ...(USE ? ['', '## Used as a user: switches flipped and turned back', '',
     `${use.switches_flipped} of ${use.switches_found} switch(es) flipped, ${use.turned_back} turned back.${use.not_turned_back.length ? ` **Not turned back: ${use.not_turned_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''} Count each flipped switch as one action in the header's "Used as a user: yes (N actions)".`, '',
+    ...(limits ? [`The owner's limits (${limits.file}): "${limits.owner_words}". Held and not flipped: ${heldSwitches.length ? [...new Set(heldSwitches.map(t => `"${t.switch}" (${t.held_by})`))].join(', ') : 'no switch matched a held action'}. Name what was held in Not verified.`, ''] : []),
     '| Page | Opened from | Switch | Was | Flipped to | Ends | What appeared away from the switch | Before | After |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : `NOT RESTORED (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
     : ['', '## Switches', '', 'Not flipped. Flipping switches needs the owner\'s yes to "use the app like a real user" (then run this again with `--use`). Until then, write in Not verified: "How features behave when used (switches, sending, results)".']),
   '', '## Controls', '', '| Page | Width | Control | Icon only | Tooltip | What happened | Errors | Screenshot |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ...rows.map(r => `| ${r.page} | ${r.width} | ${r.control.replace(/\|/g, '/')} | ${r.icon_only ? 'yes' : ''} | ${r.tooltip || (r.icon_only && r.width > 500 ? 'none' : '')} | ${(r.result || '').replace(/\|/g, '/')} | ${r.errors.join('; ').replace(/\|/g, '/')} | ${r.shot || ''} |`)];
 writeFileSync(join(outDir, 'explore.md'), md.join('\n') + '\n');
-console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped and ${use.turned_back} turned back` : ''} · ${outDir}`);
+console.log(`explore: ${totals.controls} control(s), ${totals.opened_something} opened something, ${merged.length} lead(s), ${totals.not_clicked} not clicked${USE ? `, ${use.switches_flipped} switch(es) flipped and ${use.turned_back} turned back` : ''}${limits ? `, ${heldSwitches.length} held by the owner's limits` : ''} · ${outDir}`);

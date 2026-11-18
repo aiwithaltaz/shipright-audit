@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // Walk one core task like a first-time user: click, type and pick by visible words, screenshot every step.
-// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]
+// Usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> --audit <audit> [--out dir]
+//        (older form, still works: [--profile dir] [--session session.json] --out dir)
+// --audit:   this audit's folder. The sign-in comes from <audit>/signin.json, the owner's limits from
+//            <audit>/use-limits.json, and the walk goes to <audit>/walks/<task>.
 // --profile: the sign-in window's browser profile (login.mjs prints its path). Tried first.
 // --session: a signed-in session file saved by login.mjs. The fallback.
 // With either, it stops with exit 3 if the app no longer knows us.
@@ -30,10 +33,13 @@
 //     action buttons with no name. Each problem is a lead (W-...) to decide in the pain map's Script leads.
 //   - walk.json and walk.md list every owner-approved action under "used_actions": copy them into
 //     Left behind and count them in the header's "Used as a user: yes (N actions)".
+//   - The owner's limits: when the owner said "yes, but ...", the audit writes <audit>/use-limits.json
+//     (the format is in browser.mjs). The walk reads it (--limits <file>, or the nearest one above --out)
+//     and holds any owner-approved step whose words match a held action, even with "owner_said_yes".
 // Writes <out>/<width>-NN.png per step, walk.json (full log) and walk.md (summary table).
 // Needs Node 18+ and Playwright with Chromium. Exit 0 walk finished at both widths, 1 a width broke, 2 usage.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl, analyzeScript, mergeLeads, DANGER } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, analyzeScript, mergeLeads, useLimits, heldBy, auditFolder, landedOn, DANGER } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -41,10 +47,10 @@ import { resolve, join, dirname, extname, sep, basename } from 'node:path';
 const require = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
-const pos = args.filter((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile'].includes(args[i - 1]));
+const pos = args.filter((a, i) => !a.startsWith('--') && !['--out', '--session', '--profile', '--limits', '--audit'].includes(args[i - 1]));
 const [target, planPath] = pos;
 if (!target || !planPath || !existsSync(planPath)) {
-  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> [--out dir] [--profile dir] [--session session.json]');
+  console.error('usage: node <skill>/scripts/walk.mjs <index.html|url> <plan.json> --audit <audit folder> [--out dir] [--profile dir] [--session session.json]');
   process.exit(2);
 }
 let plan;
@@ -54,11 +60,13 @@ const KNOWN = ['goto', 'click', 'fill', 'select', 'press', 'expect', 'note'];
 const unknown = plan.steps.map((s, i) => [i + 1, s.do]).filter(([, d]) => !KNOWN.includes(d));
 if (unknown.length) { console.error(`walk: unknown step type(s): ${unknown.map(([n, d]) => `step ${n} "${d}"`).join(', ')}. Use ${KNOWN.join(', ')}.`); process.exit(2); }
 
-const { session, profile } = signInFlags(args, 'walk');
+const { session, profile, landed } = signInFlags(args, 'walk');
 const oi = args.indexOf('--out');
 const slug = String(plan.task || basename(planPath, '.json')).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'task';
-const outDir = resolve(oi >= 0 ? args[oi + 1] : join('docs', 'shipright', 'audits', 'current', 'walks', slug));
+const outDir = resolve(oi >= 0 ? args[oi + 1] : join(auditFolder(args) || join('docs', 'shipright', 'audits', 'current'), 'walks', slug));
 mkdirSync(outDir, { recursive: true });
+// What the owner ruled out when they said yes with limits (null when there is no limits file).
+const limits = useLimits(args, outDir, 'walk');
 
 const remote = /^https?:/.test(target);
 const given = remote ? null : resolve(target);
@@ -160,6 +168,13 @@ async function walkAt(opened, startUrl, width) {
     const held = remote && !s.owner_said_yes && (
       (s.do === 'click' && DANGER.test(s.text || '')) ||
       ((s.do === 'fill' || s.do === 'select') && !/search|find|filter/i.test(s.field || '')));
+    // The owner's limits win over a step's own yes: "yes, but don't ..." holds every step that matches.
+    const ruledOut = s.owner_said_yes ? heldBy(limits, [s.text, s.field, s.value, s.option].filter(Boolean).join(' ')) : null;
+    if (ruledOut) {
+      entry.ok = false; entry.held = true; entry.held_by = ruledOut.action;
+      entry.error = `held back: the owner ruled this out ("${ruledOut.action}").`;
+      log.push(entry); heldAt = n; break;
+    }
     if (held) {
       entry.ok = false; entry.held = true;
       entry.error = s.do === 'click' ? `held back: "${s.text}" could change the live app. Needs the owner's yes.` : `held back: typing into "${s.field}" in a live app may autosave. Needs the owner's yes.`;
@@ -220,17 +235,17 @@ if (!remote) {
   const rel = pagePath.startsWith(root) ? pagePath.slice(root.length).split(sep).join('/') : '/' + basename(pagePath);
   startUrl = `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`;
 }
-const opened = await openContext({ session, profile, name: 'walk', url: startUrl });
+const opened = await openContext({ session, profile, name: 'walk', url: landedOn(landed, startUrl) || startUrl });
 let runs;
 try { runs = [await walkAt(opened, startUrl, 1280), await walkAt(opened, startUrl, 390)]; }
 finally { await opened.close(); if (server) server.close(); }
 
 const leads = mergeLeads(resultFindings, WIDTHS, local);
 leads.forEach((l, i) => { l.id = `W-${slug.slice(0, 20)}-${i + 1}`; });
-const report = { task: plan.task || slug, target, signed_in_with: opened.mode !== 'none' ? opened.label : null, used_actions: usedActions, leads, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
+const report = { task: plan.task || slug, target, signed_in_with: opened.mode !== 'none' ? opened.label : null, used_actions: usedActions, limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action) } : null, leads, widths: Object.fromEntries(runs.map(r => [r.width, r])) };
 writeFileSync(join(outDir, 'walk.json'), JSON.stringify(report, null, 2) + '\n');
 const [d, p] = runs;
-const state = r => r.broke_at ? `broke at step ${r.broke_at}` : r.held_at ? `held back at step ${r.held_at} (needs the owner's yes)` : r.once_at ? `stopped at step ${r.once_at} (owner-approved actions run once, at ${WIDTHS[0]})` : 'finished';
+const state = r => r.broke_at ? `broke at step ${r.broke_at}` : r.held_at ? `held back at step ${r.held_at} (${r.steps.find(x => x.n === r.held_at)?.held_by ? 'the owner ruled it out' : "needs the owner's yes"})` : r.once_at ? `stopped at step ${r.once_at} (owner-approved actions run once, at ${WIDTHS[0]})` : 'finished';
 const cell = (r, n) => { const e = r.steps.find(x => x.n === n); if (!e) return 'not reached'; if (e.once) return 'not repeated (done once at 1280)'; return `${e.ok ? 'ok' : (e.held ? 'HELD: ' : 'FAIL: ') + e.error}${e.shot ? ` (${e.shot})` : ''}`; };
 const md = [`# Walk: ${report.task}`, '', `Desktop: ${state(d)}, ${d.actions} actions · Phone: ${state(p)}, ${p.actions} actions`, '',
   '| Step | Action | 1280 | 390 |', '| --- | --- | --- | --- |',

@@ -8,7 +8,7 @@
 // when it had to fall back. SHIPRIGHT_BROWSER: chromium | msedge | chrome | webkit
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
@@ -90,6 +90,50 @@ export function normUrl(u) {
 // Also words that change data with one click: likes, pins, stars, feedback, regenerate, share.
 export const DANGER = /delete|remove|publish|\bpost\b|post now|send|\bpay|sign ?out|log ?out|archive|connect|generate|schedule|invite|save|submit|approve|purchase|\bbuy\b|upgrade|cancel (plan|subscription)|regenerate|retry|resend|\blike\b|dislike|thumb|feedback|\bvote|\bpin\b|unpin|\bstar\b|favou?rite|follow|subscribe|\bshare\b|duplicate|rename|\bfork\b|branch|record|dismiss|accept|decline/i;
 
+// ---- The owner's limits on "use it like a real user" --------------------------------------------
+// When the owner answers "yes, but ..." the audit writes <audit>/use-limits.json, in the owner's words:
+//   { "answer": "yes with limits", "owner_words": "yes, but don't generate a video",
+//     "allowed": ["flip switches and turn them back", "send up to 3 short test messages"],
+//     "held": [{ "action": "generate a video", "match": ["generate", "render"] }],
+//     "allow_controls": ["New project"] }
+// held: what the owner ruled out. A switch or an owner-approved step is held when its name matches one:
+//   with "match", when the name holds any of those words; without it, when the name holds every
+//   meaningful word of the action ("generate a video" holds "Generate video", not "Video settings").
+// allow_controls: buttons named create, add or new that the owner said may be clicked on a live app.
+// The file is found from --limits <file>, then --audit <audit>, then the nearest one above --out.
+const LIMIT_STOP = new Set('a an the any all to do dont don not no never but and or of in on for with my your our it its this that these those please anything nothing yes ok okay use using used touch make making create just only can may you i me we them at as be is are app test tests real user like up more than'.split(' '));
+// A light stem, so "generating", "generated" and "generate" match, and "images" matches "image".
+const stem = w => {
+  if (w.length < 4) return w;
+  const s = w.replace(/(ing|ed)$/, m => (w.length - m.length >= 4 ? '' : m)).replace(/s$/, '').replace(/e$/, '');
+  return s.length >= 3 ? s : w;
+};
+const tokens = t => String(t || '').toLowerCase().replace(/[’']/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+export function useLimits(args, outDir = null, name = 'audit') {
+  const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
+  const places = [];
+  if (flag('--limits')) places.push(resolve(flag('--limits')));
+  if (flag('--audit')) places.push(join(resolve(flag('--audit')), 'use-limits.json'));
+  // --out is <audit>/explore or <audit>/walks/<task>: look in it and up to 2 folders above, no further.
+  for (let d = outDir ? resolve(outDir) : null, i = 0; d && i < 3; i++) { places.push(join(d, 'use-limits.json')); const up = dirname(d); if (up === d) break; d = up; }
+  const file = places.find(p => existsSync(p));
+  if (flag('--limits') && file !== places[0]) { console.error(`${name}: limits file ${flag('--limits')} not found.`); process.exit(2); }
+  if (!file) return null;
+  let raw;
+  try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { console.error(`${name}: ${file} is not valid JSON: ${e.message}. Fix it before using the app: it holds the owner's limits.`); process.exit(2); }
+  const held = (Array.isArray(raw.held) ? raw.held : []).map(h => typeof h === 'string' ? { action: h } : h).filter(h => h && h.action)
+    .map(h => ({ action: String(h.action), any: Array.isArray(h.match) && h.match.length > 0, words: (Array.isArray(h.match) && h.match.length ? h.match.flatMap(tokens) : tokens(h.action).filter(w => !LIMIT_STOP.has(w))).map(stem) }))
+    .filter(h => h.words.length);
+  return { file, answer: String(raw.answer || ''), owner_words: String(raw.owner_words || ''), allowed: (raw.allowed || []).map(String), held, allow_controls: (raw.allow_controls || []).map(s => String(s).trim().toLowerCase()).filter(Boolean) };
+}
+// The held action a name matches, or null.
+export function heldBy(limits, name) {
+  if (!limits || !limits.held.length) return null;
+  const have = tokens(name).map(stem);
+  const has = w => have.some(t => t === w || (Math.min(t.length, w.length) >= 4 && (t.startsWith(w) || w.startsWith(t))));
+  return limits.held.find(h => h.any ? h.words.some(has) : h.words.every(has)) || null;
+}
+
 // ---- Staying signed in -------------------------------------------------------------------------
 // Many apps swap their sign-in token on every refresh, so a session file saved at sign-in goes stale
 // within seconds. The sign-in window's own browser profile always holds the newest token, so the
@@ -112,13 +156,52 @@ export async function looksSignedIn(page) {
   return !hasPassword && !LOGIN_URL.test(new URL(page.url()).pathname);
 }
 
-// Read --session and --profile from a script's arguments. A path that does not exist is a usage error.
+// One file per audit says how to sign in: <audit>/signin.json, written by login.mjs --audit <audit>.
+//   { "site", "start_url", "landed_url", "profile", "channel", "browser", "session", "signed_in_at" }
+// Every script takes --audit <audit> and reads its sign-in from that file, so no command has to spell
+// out --profile or --session (and nobody is tempted to keep them in a shell variable, which zsh passes
+// as one word, so the script gets no flags at all and runs signed out).
+// landed_url is where the app went after sign-in, when that is not the start URL: an app the landing
+// page never links into is still reached, and the sign-in check runs on a page that needs the sign-in.
+export const SIGNIN_NOTE = 'signin.json';
+export const auditFolder = args => { const i = args.indexOf('--audit'); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? resolve(args[i + 1]) : null; };
+export function readSignIn(audit) { try { return JSON.parse(readFileSync(join(audit, SIGNIN_NOTE), 'utf8')); } catch { return null; } }
+export function writeSignIn(audit, info) { mkdirSync(audit, { recursive: true }); writeFileSync(join(audit, SIGNIN_NOTE), JSON.stringify(info, null, 2) + '\n'); return join(audit, SIGNIN_NOTE); }
+
+// Read the sign-in from a script's arguments: --profile and --session when given, the rest from
+// <audit>/signin.json (--audit). --signed-out ignores them all, for the signed-out crawl.
+// A path that does not exist is a usage error. Returns { session, profile, landed, audit }.
 export function signInFlags(args, name = 'audit') {
   const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-  const session = flag('--session'), profile = flag('--profile');
+  const audit = auditFolder(args);
+  if (args.includes('--signed-out')) return { session: undefined, profile: undefined, landed: null, audit };
+  let session = flag('--session'), profile = flag('--profile'), landed = null;
   if (session && !existsSync(session)) { console.error(`${name}: session file ${session} not found. Run login.mjs first.`); process.exit(2); }
   if (profile && !(existsSync(profile) && statSync(profile).isDirectory())) { console.error(`${name}: profile folder ${profile} not found. Run login.mjs first: it prints the profile path to use.`); process.exit(2); }
-  return { session: session ? resolve(session) : undefined, profile: profile ? resolve(profile) : undefined };
+  if (audit && existsSync(join(audit, SIGNIN_NOTE))) {
+    const note = readSignIn(audit);
+    if (!note) { console.error(`${name}: ${join(audit, SIGNIN_NOTE)} is not valid JSON. Run login.mjs again with --audit "${audit}".`); process.exit(2); }
+    const given = !!(session || profile);
+    const hasProfile = note.profile && existsSync(note.profile) && statSync(note.profile).isDirectory();
+    const hasSession = note.session && existsSync(note.session);
+    if (!profile && hasProfile) profile = note.profile;
+    if (!session && hasSession) session = note.session;
+    if (!given && !profile && !session) { console.error(`${name}: ${join(audit, SIGNIN_NOTE)} points to a sign-in profile and a session file that are gone. Run login.mjs again with --audit "${audit}".`); process.exit(2); }
+    landed = note.landed_url || null;
+  }
+  return { session: session ? resolve(session) : undefined, profile: profile ? resolve(profile) : undefined, landed, audit };
+}
+// The page to check the sign-in on, and to visit first: where the app landed after sign-in, when that
+// is on the same site as the start page. Otherwise null.
+export function landedOn(landed, startUrl) {
+  try { const a = new URL(landed), b = new URL(startUrl); return a.origin === b.origin && normUrl(a.href) !== normUrl(b.href) ? a.href : null; } catch { return null; }
+}
+// Defaults from --audit: where a script writes, and the crawl it reads.
+export function auditPaths(args, sub) {
+  const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
+  const audit = auditFolder(args);
+  const crawl = flag('--crawl') || (audit && existsSync(join(audit, 'screens', 'crawl.json')) ? join(audit, 'screens', 'crawl.json') : undefined);
+  return { audit, out: resolve(flag('--out') || (audit ? join(audit, sub) : join('docs', 'shipright', 'audits', 'current', sub))), crawl };
 }
 
 export const SIGNED_OUT_EXIT = 3;
@@ -265,9 +348,11 @@ export async function openTarget(target, name = 'audit') {
   return { remote: false, startUrl: `http://127.0.0.1:${server.address().port}${rel.startsWith('/') ? rel : '/' + rel}`, root, stop: () => server.close() };
 }
 
-// Every page a script should visit: the start page, --routes, and every screen in a crawl.json.
-export function pagesToVisit({ startUrl, remote, routes, crawl, name = 'audit' }) {
+// Every page a script should visit: the start page, where the app landed after sign-in (signin.json),
+// --routes, and every screen in a crawl.json.
+export function pagesToVisit({ startUrl, remote, routes, crawl, landed = null, name = 'audit' }) {
   const urls = [startUrl];
+  if (landedOn(landed, startUrl)) urls.push(landedOn(landed, startUrl));
   for (const r of (routes || '').split(',').map(s => s.trim()).filter(Boolean)) urls.push(/^https?:/.test(r) ? r : new URL(r, startUrl).href);
   if (crawl) {
     try {
@@ -292,6 +377,21 @@ let analyzeSrc = null;
 export function analyzeScript(opts = {}) {
   analyzeSrc ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'analyze-page.js'), 'utf8');
   return `(() => { ${analyzeSrc}\n return SHIPRIGHT_ANALYZE(${JSON.stringify(opts)}); })()`;
+}
+
+// The crop for a finding: its own box when the check gave one (a problem wider than one element, like
+// a chip outside its card), else the element it marked. Returns true when a file was written.
+export async function shootFinding(page, f, file) {
+  if (f.crop) {
+    const size = await page.evaluate(() => ({ w: Math.max(document.documentElement.scrollWidth, innerWidth), h: Math.max(document.documentElement.scrollHeight, innerHeight) })).catch(() => null);
+    if (size) {
+      const x = Math.max(0, Math.min(f.crop.x, size.w - 2)), y = Math.max(0, Math.min(f.crop.y, size.h - 2));
+      const clip = { x, y, width: Math.max(2, Math.min(f.crop.width, size.w - x)), height: Math.max(2, Math.min(f.crop.height, size.h - y)) };
+      if (await page.screenshot({ path: file, fullPage: true, clip }).then(() => true).catch(() => false)) return true;
+    }
+  }
+  if (!f.mark) return false;
+  return page.locator(`[data-srv="${f.mark}"]`).first().screenshot({ path: file, timeout: 5000 }).then(() => true).catch(() => false);
 }
 
 // One lead per problem: the same check with the same words (numbers aside) on several pages or widths

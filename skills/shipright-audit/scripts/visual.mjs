@@ -2,9 +2,15 @@
 // Measure visual craft the eye misses or argues about: alignment and spacing inside repeated cards,
 // sentence-length pills, crowded pills, too many labels per card, a main action buried at the bottom, corner drift, menus covered by other layers, text that is cut off, media that never loaded,
 // a page that jumps while it loads (layout shift over 0.1), and counts that promise items a page does not have.
+// Since 0.8 also: template text left in view ("[topic]", "{name}", "undefined"), icons too faint to see
+// (under 3:1), a chip or button that sticks out of its card, the same text or control twice on one
+// screen, and two stacked rows of controls that could be one row.
 // Every finding gets a cropped screenshot when there is something to crop.
-// Usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes "#/,#/library"] [--crawl crawl.json]
-//        [--widths 1280,390] [--profile dir] [--session session.json] [--out dir] [--no-click]
+// Usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit> [--routes "#/,#/library"]
+//        [--widths 1280,390] [--no-click]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit    this audit's folder: the sign-in comes from <audit>/signin.json, the screens from
+//            <audit>/screens/crawl.json, and the results go to <audit>/visual
 // --routes   extra pages to check (hash routes, paths or URLs), in addition to the start page
 // --crawl    take every screen URL from a crawl.json written by crawl.mjs
 // --widths   screen widths to check. Both 1280 and 390 run by default: every page is checked on phone too
@@ -19,18 +25,19 @@
 // Writes visual.json, visual.md and V##-*.png crops to --out (the skill passes <audit>/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright,
 // 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, auditPaths, landedOn, shootFinding, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths'];
+const valueFlags = ['--routes', '--crawl', '--session', '--profile', '--out', '--widths', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 const flag = n => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
-if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> [--routes ...] [--crawl crawl.json] [--widths 1280,390] [--profile dir] [--session file] [--out dir] [--no-click]'); process.exit(2); }
-const outDir = resolve(flag('--out') || join('docs', 'shipright', 'audits', 'current', 'visual'));
+if (!target) { console.error('usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit folder> [--routes ...] [--widths 1280,390] [--no-click] [--crawl crawl.json] [--profile dir] [--session file] [--out dir]'); process.exit(2); }
+const paths = auditPaths(args, 'visual');
+const outDir = paths.out;
 mkdirSync(outDir, { recursive: true });
-const { session, profile } = signInFlags(args, 'visual');
+const { session, profile, landed } = signInFlags(args, 'visual');
 const noClick = args.includes('--no-click');
 const widths = widthsFlag(args);
 
@@ -81,9 +88,9 @@ async function openMenus(page, routeId, startFinding, suffix) {
 }
 
 const site = await openTarget(target, 'visual');
-const opened = await openContext({ session, profile, name: 'visual', url: site.startUrl, viewport: viewportFor(widths[0]) });
+const opened = await openContext({ session, profile, name: 'visual', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = opened.page;
-const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'visual' });
+const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'visual' });
 
 const pages = [];
 const findings = [];
@@ -110,7 +117,7 @@ try {
         seenHere.add(f.kind + f.what);
         const id = `V${String(++n).padStart(2, '0')}`;
         const shot = `${id}-${routeId}-${f.kind}${suffix}.png`;
-        if (f.mark) await page.locator(`[data-srv="${f.mark}"]`).first().screenshot({ path: join(outDir, shot) }).catch(() => null);
+        await shootFinding(page, f, join(outDir, shot));
         findings.push({ id, page: url, width, kind: f.kind, what: f.what, group: f.group, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : null });
       }
       let menus = [];
@@ -125,7 +132,7 @@ try {
         }
       }
       // The style inventory and the count check read each page once, at the first width.
-      if (width === widths[0]) pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, style: a.style, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, menus: menus.map(({ box, ...m }) => m) });
+      if (width === widths[0]) pages.push({ url, title: a.title, settled: a.settled, empty: a.empty, style: a.style, corner_scale: a.scale, median_radius: a.medianRadius, counts: a.counts, item_states: (a.item_states || []).map(({ mark, ...x }) => x), menus: menus.map(({ box, ...m }) => m) });
       else { const p = pages.find(x => x.url === url); if (p && !settled) p.settled = false; }
     }
   }
@@ -160,8 +167,16 @@ for (const l of leads.filter(x => x.kind === 'layout-shift')) {
   l.detail = { ...all[0].detail, per_page: all.map(f => ({ page: local(f.page), width: f.width, total: f.detail.total })) };
   l.shot = all[0].shot || l.shot;
 }
-writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
-const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on' };
+// The states each kind of item was seen in, across every page: "Projects: Editing, Rendering, Ready".
+const stateMap = new Map();
+for (const p of pages) for (const it of p.item_states || []) {
+  const have = stateMap.get(it.item.toLowerCase()) || { item: it.item, states: new Set(), pages: new Set() };
+  it.states.forEach(st => have.states.add(st)); have.pages.add(local(p.url));
+  stateMap.set(it.item.toLowerCase(), have);
+}
+const itemStates = [...stateMap.values()].map(x => ({ item: x.item, states: [...x.states].sort(), pages: [...x.pages] }));
+writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, item_states: itemStates, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
+const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one' };
 const md = ['# Visual checks', '', `${pages.length} page(s) at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
 const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));
@@ -173,6 +188,7 @@ md.push('', '## Style inventory (for the taste pass)', '', 'Signals, not verdict
 for (const p of pages) { const st = p.style || {}; md.push(`| ${local(p.url)} | ${(st.font_families || []).join(', ').replace(/\|/g, '/') || 'none'} (${(st.font_families || []).length}) | ${(st.font_sizes || []).length}: ${(st.font_sizes || []).join(' ')} | ${st.accent_colors ?? 0} | ${st.line_length_chars ? `${st.line_length_chars.median} / ${st.line_length_chars.max}` : 'no long text'} | ${st.all_caps_long || 0} | ${st.emoji_icons || 0} |`); }
 md.push('', `## Corner scale (px: how many cards, buttons and fields use it, at ${widths[0]} wide)`, '');
 for (const p of pages) md.push(`- ${local(p.url)}: ${Object.entries(p.corner_scale).map(([r, c]) => `${r}px x${c}`).join(', ') || 'none measured'}`);
+if (itemStates.length) md.push('', '## Item states seen (for Step 2b, Item lifecycles)', '', 'Status labels on repeated items. Add the states this missed (open one item in each state when you can). An item type with 3 or more states needs a row per state in the pain map\'s **Item lifecycles** table, and the gate checks it.', '', '| Items | States seen | Pages |', '| --- | --- | --- |', ...itemStates.map(x => `| ${x.item.replace(/\|/g, '/')} | ${x.states.join(', ')}${x.states.length >= 3 ? ' (needs Item lifecycles)' : ''} | ${x.pages.join(', ')} |`));
 const allCounts = pages.flatMap(p => p.counts.map(c => `${c.label} ${c.count}`));
 if (allCounts.length) md.push('', '## Numbers on navigation', '', ...[...new Set(allCounts)].map(c => `- ${c}`), '', 'Check what each number counts. A number on a tab reads as "this many need you".');
 const emptyPages = pages.filter(p => p.empty).length;

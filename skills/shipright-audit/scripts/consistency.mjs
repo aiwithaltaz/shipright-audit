@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Design-system drift: does the same kind of component look the same on every screen?
-// Usage: node <skill>/scripts/consistency.mjs <index.html|url> [--crawl crawl.json] [--routes "#/,/settings"]
-//        [--profile dir] [--session session.json] [--out dir] [--labels file.json] [--tokens tokens.css]
+// Usage: node <skill>/scripts/consistency.mjs <index.html|url> --audit <audit> [--routes "#/,/settings"]
+//        [--labels file.json] [--tokens tokens.css]
+//        (older form, still works: [--crawl crawl.json] [--profile dir] [--session session.json] [--out dir])
+// --audit: this audit's folder. The sign-in comes from <audit>/signin.json, the screens from
+// <audit>/screens/crawl.json, and the results go to <audit>/consistency.
 //
 // With --out (how the audit runs it): it visits the start page, --routes and every screen in --crawl,
 // signed in when --profile or --session is given, and measures each component of these kinds:
@@ -20,20 +23,21 @@
 // Labels file: { "remove": ["Remove"], "save": ["Save"] }. A data-action value must use one of those words.
 //
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first.
-import { openContext, signInFlags, openTarget, pagesToVisit, settle, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, settle, auditFolder, auditPaths, landedOn, DANGER } from './browser.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 const args = process.argv.slice(2);
-const valueFlags = ['--labels', '--tokens', '--profile', '--session', '--out', '--crawl', '--routes'];
+const valueFlags = ['--labels', '--tokens', '--profile', '--session', '--out', '--crawl', '--routes', '--audit'];
 const target = args.find((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
 if (!target) {
   console.error('usage: node <skill>/scripts/consistency.mjs <index.html|url> [--crawl crawl.json] [--routes ...] [--profile dir] [--session file] [--out dir] [--labels file.json] [--tokens tokens.css]');
   process.exit(2);
 }
 const flag = name => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const { session, profile } = signInFlags(args, 'consistency');
-const outDir = flag('--out') ? resolve(flag('--out')) : null;
+const { session, profile, landed } = signInFlags(args, 'consistency');
+const paths = auditPaths(args, 'consistency');
+const outDir = flag('--out') || auditFolder(args) ? paths.out : null;
 const labels = flag('--labels') && existsSync(flag('--labels')) ? JSON.parse(readFileSync(flag('--labels'), 'utf8')) : {};
 const tokenHex = new Set();
 if (flag('--tokens') && existsSync(flag('--tokens'))) {
@@ -158,7 +162,7 @@ const COMPONENTS = (danger) => {
 };
 
 const site = await openTarget(target, 'consistency');
-const opened = await openContext({ session, profile, name: 'consistency', url: site.startUrl, launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] } });
+const opened = await openContext({ session, profile, name: 'consistency', url: landedOn(landed, site.startUrl) || site.startUrl, launchOptions: { args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] } });
 const page = opened.page;
 const local = u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '');
 // The exit code is set here and used after the browser has closed: a sign-in profile only keeps the
@@ -197,7 +201,7 @@ try {
     }
   } else {
     mkdirSync(outDir, { recursive: true });
-    const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: flag('--crawl'), name: 'consistency' });
+    const urls = pagesToVisit({ startUrl: site.startUrl, remote: site.remote, routes: flag('--routes'), crawl: paths.crawl, landed, name: 'consistency' });
     // Two looks are the same when every measured property is within tolerance.
     const TOL = { radius: 2, height: 4, font: 1 };
     const tolFor = (kind, k) => kind === 'primary button' && k === 'height' ? 8 : TOL[k]; // a main call to action may be a size up

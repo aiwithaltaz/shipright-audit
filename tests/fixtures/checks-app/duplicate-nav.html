@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Projects</title>
+<link rel="stylesheet" href="base.css">
+<style>
+.shell { display: flex; min-height: 100vh; }
+aside { width: 200px; flex: none; border-right: 1px solid #c9c9c9; padding: 16px; }
+aside a { display: block; padding: 8px 0; color: #1c1c1c; }
+main { margin: 0; flex: 1; min-width: 0; }
+[role=tablist] { display: flex; gap: 8px; margin-bottom: 16px; }
+[role=tab] { padding: 8px 14px; border: 1px solid #777; border-radius: 8px; background: #fff; font: inherit; }
+@media (max-width: 700px) { .shell { display: block; } aside { width: auto; border-right: 0; border-bottom: 1px solid #c9c9c9; } }
+</style></head>
+<body>
+<div class="shell">
+  <aside><nav aria-label="Main"><a href="#/projects">Projects</a><a href="#/calendar">Calendar</a><a href="#/files">Files</a></nav></aside>
+  <main>
+    <h1>Projects</h1>
+    <div role="tablist" aria-label="Project views"><button type="button" role="tab" aria-selected="true">Board</button><button type="button" role="tab" aria-selected="false">Calendar</button><button type="button" role="tab" aria-selected="false">Timeline</button></div>
+    <div class="card"><h2>Spring launch</h2><p>12 tasks.</p></div>
+    <div class="card"><h2>Budget review</h2><p>4 tasks.</p></div>
+  </main>
+</div>
+</body>
+</html>

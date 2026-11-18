@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Orders</title>
+<link rel="stylesheet" href="base.css">
+<style>
+.row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+[role=tablist] { display: flex; gap: 8px; }
+[role=tab] { padding: 8px 14px; border: 1px solid #777; border-radius: 8px; background: #fff; font: inherit; }
+.list .card { margin-bottom: 12px; }
+</style></head>
+<body>
+<main>
+  <h1>Orders</h1>
+  <div class="row"><div role="tablist" aria-label="Order status"><button type="button" role="tab" aria-selected="true">All</button><button type="button" role="tab" aria-selected="false">Open</button><button type="button" role="tab" aria-selected="false">Shipped</button></div></div>
+  <div class="row"><input type="search" aria-label="Search orders" placeholder="Search orders" style="width: 200px"><select aria-label="Sort by" style="width: 130px"><option>Newest first</option><option>Oldest first</option></select></div>
+  <div class="list">
+    <div class="card"><h2>Order 1041</h2><p>Two mugs, shipped on Monday.</p></div>
+    <div class="card"><h2>Order 1042</h2><p>One kettle, packing now.</p></div>
+    <div class="card"><h2>Order 1043</h2><p>Four plates, waiting for stock.</p></div>
+  </div>
+</main>
+</body>
+</html>
