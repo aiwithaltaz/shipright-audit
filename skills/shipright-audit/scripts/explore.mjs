@@ -30,6 +30,13 @@
 //     from, went to, landed on. Each back control is tried from up to 2 different pages, because the
 //     bug often shows on one route only. Back is navigation, so this is read-only. A back control
 //     with a risky word in its name is never clicked.
+// And that sibling tabs do not move things (new in 0.9), at every width:
+//   - For each group of tabs (a tablist) or sub-pages of one section (pages that share a parent route
+//     and link to each other), it opens each tab and records where the first piece of content starts,
+//     and whether a back control, a page title and a top action are there.
+//   - "tab-shift": the content start moves by more than 4px between tabs.
+//   - "tab-chrome-differs": a back control or a page title shows on some tabs and not on others. When
+//     a sidebar or rail is in view the lead says so: a back arrow is not needed next to a sidebar.
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -388,6 +395,163 @@ async function backPass(width, budget) {
     }
   }
 }
+// ---- Sibling tabs must not move things ---------------------------------------------------------
+// The tab strips on this page: 2 to 8 visible tabs each. Marks every tab so it can be clicked.
+const FIND_TABLISTS = (danger) => {
+  const D = new RegExp(danger, 'i');
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  document.querySelectorAll('[data-srtab]').forEach(el => { delete el.dataset.srtab; });
+  const out = [];
+  document.querySelectorAll('[role=tablist]').forEach(list => {
+    if (!vis(list) || list.closest('[role=dialog], dialog, [role=menu]')) return;
+    const tabs = [...list.querySelectorAll('[role=tab]')].filter(t => vis(t) && !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+    if (tabs.length < 2 || tabs.length > 8) return;
+    const names = tabs.map(t => (text(t) || t.getAttribute('aria-label') || '').replace(/\s*\d+$/, '').slice(0, 40));
+    if (names.some(n => !n || D.test(n))) return;
+    const gi = out.length;
+    tabs.forEach((t, ti) => { t.dataset.srtab = `${gi}-${ti}`; });
+    out.push({ gi, label: list.getAttribute('aria-label') || '', key: names.join('|'), tabs: names.map((name, ti) => ({ ti, name, selected: tabs[ti].getAttribute('aria-selected') === 'true' })) });
+  });
+  return out;
+};
+// Which of these pages does the current page link to, the way a sub-navigation does? A long list of
+// item links (40 chats) is not a set of tabs.
+const SIBLING_LINKS = (members) => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const key = u => { try { const x = new URL(u, location.href); return x.origin + x.pathname.replace(/\/+$/, '') + (/^#\/?$/.test(x.hash) ? '' : x.hash); } catch { return ''; } };
+  const want = new Map(members.map(m => [key(m), m]));
+  const found = {};
+  for (const a of document.querySelectorAll('a[href]')) {
+    const k = key(a.href);
+    if (!want.has(k) || !vis(a) || found[want.get(k)]) continue;
+    // The link and its siblings: how many links sit in the same strip?
+    const strip = a.closest('nav, ul, ol, [role=tablist], [role=navigation], [class*=tabs i], [class*=subnav i]') || a.parentElement;
+    found[want.get(k)] = { name: ((a.innerText || '').replace(/\s+/g, ' ').trim() || a.getAttribute('aria-label') || '').replace(/\s*\d+$/, '').slice(0, 40), strip: strip ? [...strip.querySelectorAll('a[href]')].filter(vis).length : 1 };
+  }
+  return found;
+};
+// What the top of this page holds. Run FIND_BACKS first: it marks the back controls.
+const TAB_FACTS = () => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const own = el => [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+  const root = [...document.querySelectorAll('main, [role=main]')].find(vis) || document.body;
+  const CHROME = 'nav, header, aside, footer, [role=navigation], [role=tablist], [role=banner], [class*=sidebar i], [class*=breadcrumb i], [role=dialog], dialog, [role=tooltip], [role=menu], [data-srb], script, style, noscript, template';
+  const back = [...document.querySelectorAll('[data-srb]')].find(b => vis(b) && !b.closest('[role=dialog], dialog')) || null;
+  const title = [...root.querySelectorAll('h1, [role=heading][aria-level="1"]')].find(h => vis(h) && !h.closest(CHROME)) || null;
+  const tr = title ? title.getBoundingClientRect() : null;
+  // A top action: a button on the same line as the page title (or, with no title, in the top right corner).
+  const rr = root.getBoundingClientRect();
+  const action = [...root.querySelectorAll('button, [role=button], a[class*=btn i], a[class*=button i]')].find(b => {
+    if (!vis(b) || b.closest(CHROME) || b.hasAttribute('data-srb') || !text(b)) return false;
+    const r = b.getBoundingClientRect();
+    return tr ? (r.top < tr.bottom && r.bottom > tr.top && r.left >= tr.right - 4) : (r.top - Math.max(rr.top, 0) < 96 && r.left > rr.left + rr.width * 0.6);
+  }) || null;
+  let top = null, first = null;
+  for (const el of root.querySelectorAll('*')) {
+    if (el === title || (title && title.contains(el)) || el === action || (action && action.contains(el)) || el.closest(CHROME) || !vis(el)) continue;
+    const holds = own(el).length >= 2 || el.matches('img, video, canvas, input:not([type=hidden]), select, textarea, button, table, [role=img]');
+    if (!holds) continue;
+    const y = el.getBoundingClientRect().top + scrollY;
+    if (top === null || y < top) { top = y; first = el; }
+  }
+  const side = [...document.querySelectorAll('aside, nav, [role=navigation], [class*=sidebar i], [class*=rail i]')].some(el => { if (!vis(el)) return false; const r = el.getBoundingClientRect(); return r.height >= innerHeight * 0.6 && r.width >= 40 && r.width <= 420 && (r.left <= 8 || r.right >= innerWidth - 8); });
+  return { content_top: top === null ? null : Math.round(top), first: first ? `${first.tagName.toLowerCase()} "${(text(first) || first.getAttribute('aria-label') || first.getAttribute('placeholder') || '').slice(0, 40)}"` : null,
+    back: !!back, title: title ? text(title).slice(0, 60) : null, top_action: action ? text(action).slice(0, 40) : null, sidebar: side };
+};
+const tabGroups = []; // { group, page, width, tabs: [{ name, content_top, back, title, top_action, sidebar }] }
+// The section a page belongs to. Top-level pages have none: they are sections, not tabs of one section.
+const parentOf = u => { try { const x = new URL(u); const hash = x.hash.startsWith('#/'); const segs = (hash ? x.hash.slice(1) : x.pathname).split('/').filter(Boolean); if (segs.length < 2) return null; return x.origin + (hash ? x.pathname + '#' : '') + '/' + segs.slice(0, -1).join('/'); } catch { return null; } };
+async function tabPass(width) {
+  const seen = new Set();
+  const facts = async () => {
+    await page.evaluate(() => scrollTo(0, 0)).catch(() => {});
+    await page.evaluate(FIND_BACKS, DANGER.source).catch(() => []);
+    const f = await page.evaluate(TAB_FACTS).catch(() => null);
+    return f ? { ...f, png: await page.screenshot().catch(() => null) } : null;
+  };
+  const judge = (label, pageUrl, tabs) => {
+    const usable = tabs.filter(t => t && t.content_top !== null);
+    if (usable.length < 2) return;
+    const list = names => names.map(n => `"${n}"`).join(', ');
+    const g = { group: label, page: local(pageUrl), width, tabs: tabs.map(({ png, ...t }) => t) };
+    tabGroups.push(g);
+    const save = t => { if (!t.png) return null; const f = `E${String(++shotN).padStart(3, '0')}-tabs-${t.name.replace(/[^a-z0-9]+/gi, '-').slice(0, 24)}${width === widths[0] ? '' : `-${width}`}.png`; try { writeFileSync(join(outDir, f), t.png); return f; } catch { return null; } };
+    // The usual start is the one most tabs share (the smaller one on a tie).
+    const count = new Map();
+    for (const t of usable) count.set(t.content_top, (count.get(t.content_top) || 0) + 1);
+    const usual = [...count].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
+    const moved = usable.filter(t => Math.abs(t.content_top - usual) > 4);
+    if (moved.length) {
+      const worst = moved.slice().sort((a, b) => Math.abs(b.content_top - usual) - Math.abs(a.content_top - usual))[0];
+      const shot = save(worst), normal = save(usable.find(t => t.content_top === usual));
+      lead('tab-shift', `Switching between the tabs of ${label} moves the content: it starts ${usual}px from the top on ${list(usable.filter(t => !moved.includes(t)).map(t => t.name))}, and ${moved.map(t => `${t.content_top}px on "${t.name}" (${Math.abs(t.content_top - usual)}px ${t.content_top > usual ? 'lower' : 'higher'})`).join(', ')}`, pageUrl, width, shot,
+        { group: `tab-shift|${label}`, detail: { tabs: g.tabs, usual_top: usual, shots: [shot, normal].filter(Boolean) } });
+    }
+    const parts = [];
+    const withBack = usable.filter(t => t.back), noBack = usable.filter(t => !t.back);
+    if (withBack.length && noBack.length) parts.push(`a back control shows on ${list(withBack.map(t => t.name))} but not on ${list(noBack.map(t => t.name))}${withBack.some(t => t.sidebar) ? '. A sidebar is in view on these tabs, so a back arrow is not needed there' : ''}`);
+    const withTitle = usable.filter(t => t.title), noTitle = usable.filter(t => !t.title);
+    if (withTitle.length && noTitle.length) parts.push(`a page title shows on ${list(withTitle.map(t => t.name))} but not on ${list(noTitle.map(t => t.name))}`);
+    if (parts.length) {
+      const odd = (withBack.length && noBack.length ? (withBack.length <= noBack.length ? withBack : noBack) : (withTitle.length <= noTitle.length ? withTitle : noTitle))[0];
+      const shot = save(odd);
+      lead('tab-chrome-differs', `The tabs of ${label} do not share the same top: ${parts.join('. Also, ')}`, pageUrl, width, shot,
+        { group: `tab-chrome|${label}`, detail: { tabs: g.tabs, back_on: withBack.map(t => t.name), title_on: withTitle.map(t => t.name), sidebar_in_view: usable.some(t => t.sidebar), shots: [shot].filter(Boolean) } });
+    }
+  };
+  // (a) Sub-pages of one section: pages in scope that share a parent route and link to each other.
+  const byParent = new Map();
+  for (const u of urls) { const p = parentOf(u); if (!p) continue; (byParent.get(p) || byParent.set(p, []).get(p)).push(u); }
+  for (const [parent, members] of byParent) {
+    const withParent = urls.find(u => pageKey(u) === pageKey(parent)) ? [urls.find(u => pageKey(u) === pageKey(parent)), ...members] : members;
+    if (withParent.length < 2) continue;
+    await page.goto(withParent[0], { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+    await settle(page, { timeout: 6000 });
+    const linked = await page.evaluate(SIBLING_LINKS, withParent).catch(() => ({}));
+    const set = withParent.filter(u => linked[u] && linked[u].strip <= 8).slice(0, 8);
+    if (!set.includes(withParent[0])) set.unshift(withParent[0]);
+    if (set.length < 2) continue;
+    const key = set.map(pageKey).sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const tabs = [];
+    for (const u of set) {
+      if (u !== withParent[0] || tabs.length) { await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null); await settle(page, { timeout: 6000 }); }
+      const f = await facts();
+      const name = (linked[u] && linked[u].name) || (f && f.title) || decodeURIComponent((new URL(u).hash || new URL(u).pathname).split('/').filter(Boolean).pop() || 'home');
+      tabs.push(f ? { name, ...f } : null);
+    }
+    judge(`${local(parent).replace(/^\/index\.html#/, '') || '/'} (${set.length} sub-pages)`, set[0], tabs.filter(Boolean));
+  }
+  // (b) Tab strips on each page.
+  for (const url of urls) {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
+    await settle(page, { timeout: 6000 });
+    const lists = await page.evaluate(FIND_TABLISTS, DANGER.source).catch(() => []);
+    for (const tl of lists.slice(0, 4)) {
+      if (seen.has(tl.key)) continue;
+      seen.add(tl.key);
+      const tabs = [];
+      for (const t of tl.tabs) {
+        // Find the strip again each time: a tab that is a link loads a new page and the marks are gone.
+        const now = (await page.evaluate(FIND_TABLISTS, DANGER.source).catch(() => [])).find(x => x.key === tl.key);
+        if (!now) break;
+        if (!(await page.click(`[data-srtab="${now.gi}-${t.ti}"]`, { timeout: 3000 }).then(() => true).catch(() => false))) continue;
+        await settle(page, { timeout: 3000 });
+        const f = await facts();
+        if (f) tabs.push({ name: t.name, ...f });
+      }
+      judge(tl.label ? `"${tl.label}"` : `${tl.tabs.map(t => t.name).slice(0, 4).join(' / ')}`, url, tabs);
+      // Put the first tab back.
+      const was = tl.tabs.find(t => t.selected);
+      const now = (await page.evaluate(FIND_TABLISTS, DANGER.source).catch(() => [])).find(x => x.key === tl.key);
+      if (was && now) { await page.click(`[data-srtab="${now.gi}-${was.ti}"]`, { timeout: 3000 }).catch(() => null); await settle(page, { timeout: 2000 }); }
+      else { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null); await settle(page, { timeout: 6000 }); }
+    }
+  }
+}
 const markControls = () => page.evaluate(sel => { document.querySelectorAll(sel).forEach((el, i) => { el.dataset.sre = String(i); }); }, CONTROLS).catch(() => {});
 
 try {
@@ -481,6 +645,7 @@ try {
         else if (after.url !== before.url) row.result = `went to ${local(after.url)}`;
         else if (newOpen.length) row.result = `opened ${newOpen.join('; ')}`;
         else if (Math.abs(after.text - before.text) > 20) row.result = 'changed the page';
+        else if (await page.evaluate(s2 => { const el = document.querySelector(s2); return !!el && el.getAttribute('role') === 'tab' && el.getAttribute('aria-selected') === 'true'; }, sel).catch(() => false)) row.result = 'changed the page (the tab is selected)';
         else row.result = 'nothing visible happened';
         if (/^opened|changed/.test(row.result)) {
           row.shot = `E${String(++shotN).padStart(3, '0')}-${routeId}-${c.name.replace(/[^a-z0-9]+/gi, '-').slice(0, 24)}${firstWidth ? '' : `-${width}`}.png`;
@@ -555,6 +720,8 @@ try {
     }
     // Back goes back: follow the links between pages and try each in-app back control.
     await backPass(width, firstWidth ? 24 : 12);
+    // Sibling tabs: open each tab of a section and compare where the content starts and what sits on top.
+    await tabPass(width);
   }
 } finally {
   await ctx.close();
@@ -615,7 +782,7 @@ const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
 const notClicked = unique.filter(r => /^not clicked/.test(r.result || ''));
 const totals = { controls: unique.length, clicked: unique.filter(wasClicked).length, opened_something: openedCount, did_nothing: unique.filter(r => r.result === 'nothing visible happened').length, not_clicked: notClicked.length, caused_errors: unique.filter(r => r.errors.length).length };
-writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, back_controls: backs, leads: merged }, null, 2) + '\n');
+writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
 const md = ['# Explore: every safe control', '',
   `${totals.controls} control(s) at ${widths.join(' and ')} wide: ${totals.opened_something} opened something, ${totals.did_nothing} did nothing visible, ${totals.not_clicked} not clicked, ${totals.caused_errors} caused errors.`, '',
   `For the pain map header: **Controls opened: ${totals.clicked} of ${totals.controls}**`, '',
@@ -631,6 +798,9 @@ const md = ['# Explore: every safe control', '',
   '', '## Back controls', '', ...(backs.length ? ['Each in-app back control was reached from another page and clicked. It should land on the page the user came from.', '', '| Back control | On page | Width | Came from | Landed on | Result |', '| --- | --- | --- | --- | --- | --- |',
     ...backs.flatMap(b => b.routes.map(r => `| ${b.control.replace(/\|/g, '/')} | ${r.went_to} | ${r.width} | ${r.came_from} | ${r.landed_on || ''} | ${r.result === 'went elsewhere' ? '**went elsewhere**' : r.result} |`))]
     : ['No in-app back control was found on a page reached from another page.']),
+  '', '## Sibling tabs', '', ...(tabGroups.length ? ['Each tab of a section was opened. The content should start at the same height on every tab, with the same back control and title.', '', '| Tabs | Width | Tab | Content starts at | Back control | Page title | Top action |', '| --- | --- | --- | --- | --- | --- | --- |',
+    ...tabGroups.flatMap(g => g.tabs.map(t => `| ${g.group.replace(/\|/g, '/')} | ${g.width} | ${t.name.replace(/\|/g, '/')} | ${t.content_top === null ? 'no content' : t.content_top + 'px'} | ${t.back ? 'yes' : 'no'} | ${(t.title || 'none').replace(/\|/g, '/')} | ${(t.top_action || 'none').replace(/\|/g, '/')} |`))]
+    : ['No group of tabs or linked sub-pages was found.']),
   '', '## Controls', '', '| Page | Width | Control | Icon only | Tooltip | What happened | Errors | Screenshot |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ...rows.map(r => `| ${r.page} | ${r.width} | ${r.control.replace(/\|/g, '/')} | ${r.icon_only ? 'yes' : ''} | ${r.tooltip || (r.icon_only && r.width > 500 ? 'none' : '')} | ${(r.result || '').replace(/\|/g, '/')} | ${r.errors.join('; ').replace(/\|/g, '/')} | ${r.shot || ''} |`)];
 writeFileSync(join(outDir, 'explore.md'), md.join('\n') + '\n');

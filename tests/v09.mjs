@@ -56,6 +56,25 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
       !good.json.leads.some(l => l.kind === 'back-goes-elsewhere') && arrow.how === 'arrow' && arrow.routes.length >= 2 && arrow.routes.every(r => r.result === 'went back'),
       `${arrow.how || 'not found'}: ${arrow.routes.map(r => r.result).join(', ')}`);
   }
+
+  // Step 2. Sibling tabs must not move things. 3 tabs, where one adds a back arrow that pushes the
+  // content down 40px: 1 tab-shift lead and 1 tab-chrome-differs lead (which says a sidebar is in view).
+  // 3 identical tabs give none. Sub-pages of one section count as tabs too: one without a title is a lead.
+  if (want('tabs') && hasPw) {
+    const TAB = ['tab-shift', 'tab-chrome-differs'];
+    const bad = explore('tests/fixtures/tabs-app/index.html'), same = explore('tests/fixtures/tabs-app/same.html');
+    const leads = bad.json.leads.filter(l => TAB.includes(l.kind));
+    const shift = leads.filter(l => l.kind === 'tab-shift'), chrome = leads.filter(l => l.kind === 'tab-chrome-differs');
+    ok('tabs: one tab with a back arrow that pushes the content down 40px is 1 tab-shift and 1 tab-chrome-differs lead',
+      shift.length === 1 && chrome.length === 1 && /on "Team" \(40px lower\)/.test(shift[0].what) && /a back control shows on "Team" but not on "General", "Billing"/.test(chrome[0].what) && /A sidebar is in view/.test(chrome[0].what)
+      && shift[0].widths.join() === '1280,390' && [shift[0], chrome[0]].every(l => l.shot && existsSync(join(bad.o, l.shot))), say(leads));
+    ok('tabs: 3 identical tabs give no lead, and a tab that gets selected is not a dead control',
+      !same.json.leads.some(l => TAB.includes(l.kind)) && (same.json.tab_groups || []).length === 2 && !same.json.leads.some(l => l.kind === 'dead-control' && /Billing|Team/.test(l.what)), say(same.json.leads));
+    const sub = explore('tests/fixtures/tabs-app/pages.html', ['--routes', '#/account/profile,#/account/security,#/account/plan', '--widths', '1280']);
+    const subLeads = sub.json.leads.filter(l => TAB.includes(l.kind));
+    ok('tabs: sub-pages of one section are compared too, and one with no page title is a lead',
+      subLeads.some(l => l.kind === 'tab-chrome-differs' && /a page title shows on "Profile", "Security" but not on "Plan"/.test(l.what)) && subLeads.filter(l => l.kind === 'tab-chrome-differs').length === 1, say(subLeads));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
