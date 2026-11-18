@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ledger</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+nav { display: flex; gap: 16px; padding: 14px 24px; border-bottom: 1px solid #ddd; }
+main { max-width: 720px; margin: 0 auto; padding: 24px; }
+.top { display: flex; align-items: center; gap: 12px; }
+.arrow { width: 36px; height: 36px; border: 1px solid #999; border-radius: 8px; background: #fff; font-size: 18px; }
+</style></head>
+<body>
+<nav><a href="#/">Home</a><a href="#/reports">Reports</a></nav>
+<main id="app"></main>
+<script>
+  const app = document.getElementById('app');
+  const views = {
+    '#/': '<h1>Home</h1><p>Three invoices are waiting.</p><p><a href="#/settings">Settings</a></p>',
+    '#/reports': '<h1>Reports</h1><p>Income this month: 4,200.</p><p><a href="#/settings">Report settings</a></p>',
+    '#/settings': '<div class="top"><button class="arrow" id="back">&#8592;</button><h1>Settings</h1></div><p>Currency: EUR</p>',
+  };
+  const draw = () => {
+    app.innerHTML = views[location.hash] || views['#/'];
+    const back = document.getElementById('back');
+    if (back) back.onclick = () => { history.back(); };
+  };
+  addEventListener('hashchange', draw);
+  draw();
+</script>
+</body>
+</html>

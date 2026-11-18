@@ -22,6 +22,14 @@
 //     filter, tab, chip, link or sort option using the same word ("Starred", "Favorites", "Pinned",
 //     "Saved", "Flagged"). The menus this script opens count too. If there is none, that is a
 //     "marker-no-filter" lead: "You can star items but not see only starred items."
+// It also checks that Back goes back (new in 0.9), at every width:
+//   - On each page it follows the links to other pages of the app, and on the page it lands on it looks
+//     for an in-app back control: a button or link named Back, or an unnamed left-arrow icon button at
+//     the top of the page or panel. It clicks it, waits, and compares where it landed with the page it
+//     came from. Landing anywhere else is a "back-goes-elsewhere" lead that names the 3 pages: came
+//     from, went to, landed on. Each back control is tried from up to 2 different pages, because the
+//     bug often shows on one route only. Back is navigation, so this is read-only. A back control
+//     with a risky word in its name is never clicked.
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -48,7 +56,7 @@
 // format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
 // every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, normUrl, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -268,6 +276,118 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
     if (opener) await page.evaluate(FIND_TOGGLES, [TOGGLES, LAYERS, inLayer]).catch(() => []);
   }
 }
+// ---- Back goes back ----------------------------------------------------------------------------
+// In-app back controls on this page: a button or link named Back ("Back", "Go back", "Back to
+// projects"), or an icon button with no name that shows a left arrow at the top of the page or panel.
+// Not a back control: the left arrow of a pair (previous and next in a carousel, a calendar, a pager),
+// a breadcrumb, a tab, or anything with a risky word in its name.
+const FIND_BACKS = (danger) => {
+  const D = new RegExp(danger, 'i');
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
+  const NAMED = /^\W*((go|navigate|take me)\s+)?back(\s+to\b.{0,30})?\W*$/i;
+  const GLYPH = /^\s*[←‹❮⟵«<⬅↩◀⭠\u{1F519}]️?\s*$/u;
+  const LEFT = /(arrow|chevron|caret|angle)[-_ ]?(left|back)|left[-_ ]?(arrow|chevron|caret)|(^|[\s_:#/.-])back([\s_.-]|$)|arrow_back|chevron_left|navigate_before/i;
+  const RIGHT = /(arrow|chevron|caret|angle)[-_ ]?(right|forward|next)|right[-_ ]?(arrow|chevron|caret)|arrow_forward|chevron_right|navigate_next|^\s*[→›❯⟶»>➡▶]️?\s*$/iu;
+  const AWAY = '[class*=carousel i], [class*=slider i], [class*=swiper i], [class*=pagination i], [class*=pager i], [class*=calendar i], [class*=datepicker i], [role=tablist], [class*=breadcrumb i], [aria-label*=breadcrumb i], footer, [role=menu], [role=listbox]';
+  const hintOf = el => { const icon = el.querySelector('svg, i, use, img, [data-icon], [class*=icon i]'); const use = el.querySelector('use'); return [el.getAttribute('data-icon'), typeof el.className === 'string' ? el.className : '', icon && icon.getAttribute('data-icon'), icon && (icon.getAttribute('class') || ''), icon && (icon.getAttribute('alt') || ''), icon && (icon.getAttribute('src') || '').split('/').pop(), use && (use.getAttribute('href') || use.getAttribute('xlink:href') || ''), el.querySelector('title') && el.querySelector('title').textContent].filter(Boolean).join(' '); };
+  document.querySelectorAll('[data-srb]').forEach(el => { delete el.dataset.srb; });
+  const out = [];
+  for (const el of document.querySelectorAll('a[href], button, [role=button], [role=link]')) {
+    if (!vis(el) || el.disabled || el.getAttribute('aria-disabled') === 'true' || el.closest(AWAY)) continue;
+    const text = (el.innerText || '').replace(/\s+/g, ' ').trim();
+    const said = (el.getAttribute('aria-label') || el.getAttribute('title') || '').trim();
+    const wordy = /[\p{L}\p{N}]/u.test(text);
+    const name = (wordy ? text : (said || text)).slice(0, 60);
+    let how = null;
+    if (wordy || said) { if (name.length <= 40 && NAMED.test(wordy ? text : said)) how = 'name'; }
+    else if (GLYPH.test(text) || LEFT.test(hintOf(el))) how = 'arrow';
+    if (!how || D.test(name)) continue;
+    const r = el.getBoundingClientRect();
+    if (how === 'arrow') {
+      // At the top of the page or of its panel, on the left, and not half of a previous / next pair.
+      const panel = el.closest('[role=dialog], dialog, aside, section, article, main, [class*=panel i], [class*=drawer i]');
+      const top = Math.min(r.top, panel ? r.top - panel.getBoundingClientRect().top : r.top);
+      if (top > 160 || r.left > innerWidth * 0.6 || r.width > 64 || r.height > 64) continue;
+      const row = el.parentElement;
+      if (row && [...row.querySelectorAll('a[href], button, [role=button]')].some(x => x !== el && vis(x) && RIGHT.test(((x.innerText || '').trim() || '') + ' ' + hintOf(x)) && !/[\p{L}]{3,}/u.test((x.innerText || '').trim()))) continue;
+    }
+    el.dataset.srb = String(out.length);
+    out.push({ i: out.length, name: how === 'arrow' ? 'the left arrow' : name, how, top: Math.round(r.top) });
+  }
+  return out;
+};
+// Links on this page to other pages of the same app: one per destination, never a risky word.
+const FIND_LINKS = (danger) => {
+  const D = new RegExp(danger, 'i');
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
+  const page = u => u.origin + u.pathname.replace(/\/+$/, '') + ((u.hash.startsWith('#/') || u.hash.startsWith('#!')) && u.hash !== '#/' ? u.hash : '');
+  const here = page(new URL(location.href));
+  document.querySelectorAll('[data-srl]').forEach(el => { delete el.dataset.srl; });
+  const out = [], seen = new Set();
+  for (const el of document.querySelectorAll('a[href]')) {
+    const raw = (el.getAttribute('href') || '').trim();
+    if (!raw || /^(javascript:|mailto:|tel:|data:|blob:)/i.test(raw) || (el.target && el.target !== '_self') || el.hasAttribute('download') || !vis(el)) continue;
+    let u; try { u = new URL(el.href); } catch { continue; }
+    if (u.origin !== location.origin || page(u) === here || seen.has(page(u))) continue;
+    const name = ((el.innerText || '').replace(/\s+/g, ' ').trim() || el.getAttribute('aria-label') || el.getAttribute('title') || '').slice(0, 60);
+    if (D.test(name) || /log-?out|sign-?out|signout|delete|remove|unsubscribe|\/auth\/|\/oauth|\.(pdf|zip|csv|png|jpe?g|docx?|xlsx?)$/i.test(u.pathname + u.search)) continue;
+    seen.add(page(u));
+    el.dataset.srl = String(out.length);
+    out.push({ i: out.length, name: name || u.pathname, href: u.href });
+  }
+  return out;
+};
+// One page, whatever its query string: "/projects?tab=2" and "/projects" are the same place to come back to.
+const pageKey = u => { try { const x = new URL(u); return x.origin + x.pathname.replace(/\/+$/, '') + (/^#\/?$/.test(x.hash) ? '' : x.hash); } catch { return u; } };
+const backControls = new Map(); // "page|control" -> { page, control, how, routes: [{ width, came_from, went_to, landed_on, result, shot }] }
+async function backPass(width, budget) {
+  const routesTo = new Map(), noBack = new Set();
+  const load = async u => { await page.goto(u, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null); await settle(page, { timeout: 6000 }); };
+  // Start from every page in scope, then from the pages their links lead to (a few), so a back control
+  // is reached from 2 different pages even when no crawl was given.
+  const starts = [...urls];
+  for (let n = 0; n < starts.length; n++) {
+    const url = starts[n];
+    if (budget <= 0) break;
+    await load(url);
+    const from = page.url();
+    const links = await page.evaluate(FIND_LINKS, DANGER.source).catch(() => []);
+    for (const l of links) if (starts.length < urls.length + 6 && !starts.some(u => pageKey(u) === pageKey(l.href))) starts.push(l.href);
+    for (const l of links) {
+      if (budget <= 0) break;
+      const dest = pageKey(l.href);
+      if (noBack.has(dest) || (routesTo.get(dest) || 0) >= 2) continue;
+      if (pageKey(page.url()) !== pageKey(from)) { await load(url); await page.evaluate(FIND_LINKS, DANGER.source).catch(() => []); }
+      if (!(await page.click(`[data-srl="${l.i}"]`, { timeout: 3000 }).then(() => true).catch(() => false))) continue;
+      await settle(page, { timeout: 4000 });
+      const went = page.url();
+      if (pageKey(went) === pageKey(from) || new URL(went).origin !== new URL(from).origin) continue;
+      const backs = await page.evaluate(FIND_BACKS, DANGER.source).catch(() => []);
+      if (!backs.length) { noBack.add(dest); if (pageKey(went) !== dest) noBack.add(pageKey(went)); continue; }
+      const b = backs[0];
+      budget--;
+      routesTo.set(dest, (routesTo.get(dest) || 0) + 1);
+      const key = `${pageKey(went)}|${b.name}`;
+      const entry = backControls.get(key) || { page: local(went), control: b.name, how: b.how, routes: [] };
+      backControls.set(key, entry);
+      // The same route at another width was already tried when both ends match: try it again anyway,
+      // because a phone layout often has its own back arrow.
+      const route = { width, came_from: local(from), went_to: local(went), landed_on: null, result: null, shot: null, url: went };
+      entry.routes.push(route);
+      if (!(await page.click(`[data-srb="${b.i}"]`, { timeout: 3000 }).then(() => true).catch(() => false))) { route.result = 'could not click (covered or moved)'; continue; }
+      await settle(page, { timeout: 4000 });
+      const landed = page.url();
+      route.landed_on = local(landed);
+      if (pageKey(landed) === pageKey(from)) route.result = 'went back';
+      else if (pageKey(landed) === pageKey(went)) route.result = 'stayed on the page';
+      else {
+        route.result = 'went elsewhere';
+        route.shot = `E${String(++shotN).padStart(3, '0')}-back-${(new URL(went).hash || new URL(went).pathname).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 24) || 'home'}${width === widths[0] ? '' : `-${width}`}.png`;
+        await page.screenshot({ path: join(outDir, route.shot) }).catch(() => { route.shot = null; });
+      }
+    }
+  }
+}
 const markControls = () => page.evaluate(sel => { document.querySelectorAll(sel).forEach((el, i) => { el.dataset.sre = String(i); }); }, CONTROLS).catch(() => {});
 
 try {
@@ -433,6 +553,8 @@ try {
         await page.emulateMedia({ reducedMotion: null }).catch(() => {});
       }
     }
+    // Back goes back: follow the links between pages and try each in-app back control.
+    await backPass(width, firstWidth ? 24 : 12);
   }
 } finally {
   await ctx.close();
@@ -463,10 +585,28 @@ for (const g of sideEffects.values()) {
   found.push({ kind: 'toggle-side-effect', what, page: urls.find(u => local(u) === g.t.page) || g.t.page, width: g.t.width, shot: g.shot, group: `${g.t.opener || '(page)'}|${g.nearBox}`, detail: { switches: g.names, added: g.adds, near_message_box: g.nearBox } });
 }
 
+// A back control that lands somewhere other than the page the user came from. One lead per control,
+// with the 3 pages of the first route that went wrong, and what the other routes did.
+for (const b of backControls.values()) {
+  const wrong = b.routes.filter(r => r.result === 'went elsewhere');
+  if (!wrong.length) continue;
+  const first = wrong[0];
+  const others = [...new Map(wrong.slice(1).filter(r => r.came_from !== first.came_from).map(r => [r.came_from, r])).values()];
+  const right = [...new Set(b.routes.filter(r => r.result === 'went back').map(r => r.came_from))];
+  const what = `Back does not go back: ${b.how === 'arrow' ? 'the left arrow' : `"${b.control}"`} on ${first.went_to} lands on ${first.landed_on}, not on the page the user came from. Came from ${first.came_from}, went to ${first.went_to}, landed on ${first.landed_on}`
+    + (others.length ? `. Also from ${others.map(r => `${r.came_from} (landed on ${r.landed_on})`).join(', ')}` : '')
+    + (right.length ? `. From ${right.join(', ')} it went back correctly` : '');
+  for (const w of [...new Set(wrong.map(r => r.width))]) {
+    const r = wrong.find(x => x.width === w);
+    found.push({ kind: 'back-goes-elsewhere', what, page: r.url, width: w, shot: r.shot, group: `back|${b.page}|${b.control}`, detail: { control: b.control, came_from: first.came_from, went_to: first.went_to, landed_on: first.landed_on, routes: b.routes.map(({ url, ...x }) => x) } });
+  }
+}
+const backs = [...backControls.values()].map(b => ({ ...b, routes: b.routes.map(({ url, ...x }) => x) }));
+
 // The same lead on several pages or widths is one lead. Hover and dead-control leads are found once, at
 // the first width a control is seen, so they do not say "at 1280 only".
 const merged = mergeLeads(found.map((f, i) => ({ ...f, id: `E${i}` })), widths, local);
-merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
+merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name', 'back-goes-elsewhere'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
 const heldSwitches = toggles.filter(t => t.held_by);
 const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch),
   limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action), held_switches: heldSwitches.map(t => ({ switch: t.switch, page: t.page, held_by: t.held_by })) } : null };
@@ -475,7 +615,7 @@ const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
 const notClicked = unique.filter(r => /^not clicked/.test(r.result || ''));
 const totals = { controls: unique.length, clicked: unique.filter(wasClicked).length, opened_something: openedCount, did_nothing: unique.filter(r => r.result === 'nothing visible happened').length, not_clicked: notClicked.length, caused_errors: unique.filter(r => r.errors.length).length };
-writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, leads: merged }, null, 2) + '\n');
+writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, back_controls: backs, leads: merged }, null, 2) + '\n');
 const md = ['# Explore: every safe control', '',
   `${totals.controls} control(s) at ${widths.join(' and ')} wide: ${totals.opened_something} opened something, ${totals.did_nothing} did nothing visible, ${totals.not_clicked} not clicked, ${totals.caused_errors} caused errors.`, '',
   `For the pain map header: **Controls opened: ${totals.clicked} of ${totals.controls}**`, '',
@@ -488,6 +628,9 @@ const md = ['# Explore: every safe control', '',
     '| Page | Opened from | Switch | Was | Flipped to | Ends | What appeared away from the switch | Before | After |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : `NOT RESTORED (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
     : ['', '## Switches', '', 'Not flipped. Flipping switches needs the owner\'s yes to "use the app like a real user" (then run this again with `--use`). Until then, write in Not verified: "How features behave when used (switches, sending, results)".']),
+  '', '## Back controls', '', ...(backs.length ? ['Each in-app back control was reached from another page and clicked. It should land on the page the user came from.', '', '| Back control | On page | Width | Came from | Landed on | Result |', '| --- | --- | --- | --- | --- | --- |',
+    ...backs.flatMap(b => b.routes.map(r => `| ${b.control.replace(/\|/g, '/')} | ${r.went_to} | ${r.width} | ${r.came_from} | ${r.landed_on || ''} | ${r.result === 'went elsewhere' ? '**went elsewhere**' : r.result} |`))]
+    : ['No in-app back control was found on a page reached from another page.']),
   '', '## Controls', '', '| Page | Width | Control | Icon only | Tooltip | What happened | Errors | Screenshot |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
   ...rows.map(r => `| ${r.page} | ${r.width} | ${r.control.replace(/\|/g, '/')} | ${r.icon_only ? 'yes' : ''} | ${r.tooltip || (r.icon_only && r.width > 500 ? 'none' : '')} | ${(r.result || '').replace(/\|/g, '/')} | ${r.errors.join('; ').replace(/\|/g, '/')} | ${r.shot || ''} |`)];
 writeFileSync(join(outDir, 'explore.md'), md.join('\n') + '\n');

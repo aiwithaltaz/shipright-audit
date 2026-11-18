@@ -341,6 +341,14 @@ if (hasPw) {
   await run08(ok, { hasPw });
 }
 
+// 21. Everything added in 0.9 (tests/v09.mjs): back controls, sibling tabs, component borders, tight
+// padding, see-through layers, options that vanish, duplicate controls by what they open, the 3 false
+// alarms, the stability fixes and the update hook.
+{
+  const { run09 } = await import('./v09.mjs');
+  await run09(ok, { hasPw });
+}
+
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)
 r = run(['skills/shipright-audit/scripts/check-stage.mjs', 'skills/shipright-audit/templates/pain-map.md']);
 ok('gate runs from the command line and fails an unfilled template', r.status === 1 && /^FAIL/.test(r.stdout), `exit ${r.status}`);
