@@ -185,7 +185,8 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     const rail = explore('tests/fixtures/rail-app/index.html', ['--widths', '1280']), bare = explore('tests/fixtures/rail-app/bare.html', ['--widths', '1280']);
     const tips = j => j.leads.filter(l => l.kind === 'no-tooltip');
     ok('a rail that opens on hover counts as labeled: no no-tooltip leads',
-      tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 3 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')), say(rail.json.leads));
+      tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 3 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')),
+      `${say(tips(rail.json))}; ${rail.json.controls.filter(c => c.icon_only).length} icon-only control(s): ${rail.json.controls.map(c => `${c.control}${c.icon_only ? '' : ' (seen with words)'}: ${c.tooltip || 'no tooltip'}`).join(' | ')}`);
     ok('the same rail with no labels on hover still gives 3 no-tooltip leads', tips(bare.json).length === 3, say(tips(bare.json)));
   }
 
