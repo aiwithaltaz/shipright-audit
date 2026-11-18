@@ -399,7 +399,7 @@ const FIND_LINKS = (danger) => {
     let u; try { u = new URL(el.href); } catch { continue; }
     if (u.origin !== location.origin || page(u) === here || seen.has(page(u))) continue;
     const name = ((el.innerText || '').replace(/\s+/g, ' ').trim() || el.getAttribute('aria-label') || el.getAttribute('title') || '').slice(0, 60);
-    if (D.test(name) || /log-?out|sign-?out|signout|delete|remove|unsubscribe|\/auth\/|\/oauth|\.(pdf|zip|csv|png|jpe?g|docx?|xlsx?)$/i.test(u.pathname + u.search)) continue;
+    if (D.test(name) || /log-?out|sign-?out|signout|delete|remove|unsubscribe|export|download|\/api\/|\/auth\/|\/oauth|\.(pdf|zip|csv|png|jpe?g|docx?|xlsx?)$/i.test(u.pathname + u.search)) continue;
     seen.add(page(u));
     el.dataset.srl = String(out.length);
     out.push({ i: out.length, name: name || u.pathname, href: u.href });
@@ -525,8 +525,7 @@ const TAB_FACTS = () => {
 const tabGroups = []; // { group, page, width, tabs: [{ name, content_top, back, title, top_action, sidebar }] }
 // The section a page belongs to. Top-level pages have none: they are sections, not tabs of one section.
 const parentOf = u => { try { const x = new URL(u); const hash = x.hash.startsWith('#/'); const segs = (hash ? x.hash.slice(1) : x.pathname).split('/').filter(Boolean); if (segs.length < 2) return null; return x.origin + (hash ? x.pathname + '#' : '') + '/' + segs.slice(0, -1).join('/'); } catch { return null; } };
-async function tabPass(width) {
-  const seen = new Set();
+function tabTools(width) {
   const facts = async () => {
     await page.evaluate(() => scrollTo(0, 0)).catch(() => {});
     await page.evaluate(FIND_BACKS, DANGER.source).catch(() => []);
@@ -563,11 +562,18 @@ async function tabPass(width) {
         { group: `tab-chrome|${label}`, detail: { tabs: g.tabs, back_on: withBack.map(t => t.name), title_on: withTitle.map(t => t.name), sidebar_in_view: usable.some(t => t.sidebar), shots: [shot].filter(Boolean) } });
     }
   };
-  // (a) Sub-pages of one section: pages in scope that share a parent route and link to each other.
+  return { facts, judge };
+}
+// (a) Sub-pages of one section: pages in scope that share a parent route and link to each other.
+async function tabPass(width) {
+  const seen = new Set();
+  const { facts, judge } = tabTools(width);
   const byParent = new Map();
   for (const u of urls) { const p = parentOf(u); if (!p) continue; (byParent.get(p) || byParent.set(p, []).get(p)).push(u); }
   for (const [parent, members] of byParent) {
-    const withParent = urls.find(u => pageKey(u) === pageKey(parent)) ? [urls.find(u => pageKey(u) === pageKey(parent)), ...members] : members;
+    // Siblings only. The section's own page is not one of its tabs: a list and one of its items
+    // (/shifts and /shifts/4) are a page and its detail, and they are meant to differ.
+    const withParent = members;
     if (withParent.length < 2) continue;
     await page.goto(withParent[0], { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
     await settle(page, { timeout: 6000 });
@@ -587,14 +593,17 @@ async function tabPass(width) {
     }
     judge(`${local(parent).replace(/^\/index\.html#/, '') || '/'} (${set.length} sub-pages)`, set[0], tabs.filter(Boolean));
   }
-  // (b) Tab strips on each page.
-  for (const url of urls) {
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
-    await settle(page, { timeout: 6000 });
+}
+// (b) Tab strips on the page that is open now. Called once per page and width, while the main pass is
+// on that page, so it costs no extra page load when a page has no tabs.
+const seenTabs = new Set();
+async function tabStrips(url, width) {
+  const { facts, judge } = tabTools(width);
+  {
     const lists = await page.evaluate(FIND_TABLISTS, DANGER.source).catch(() => []);
     for (const tl of lists.slice(0, 4)) {
-      if (seen.has(tl.key)) continue;
-      seen.add(tl.key);
+      if (seenTabs.has(`${width}|${tl.key}`)) continue;
+      seenTabs.add(`${width}|${tl.key}`);
       const tabs = [];
       for (const t of tl.tabs) {
         // Find the strip again each time: a tab that is a link loads a new page and the marks are gone.
@@ -1142,6 +1151,9 @@ try {
       // With the owner's yes, or when not signed in: pick each option of the theme switchers, view
       // toggles and segmented controls, and see whether an option vanishes.
       if (PICK && firstWidth) await optionPass(url, width);
+      // Sibling tabs: open each tab of a tab strip on this page and compare where the content starts
+      // and what sits on top.
+      await tabStrips(url, width);
       // Reduced motion, once per page: ask for less motion, load the page again, and open one menu.
       if (firstWidth) {
         await page.emulateMedia({ reducedMotion: 'reduce' }).catch(() => {});
@@ -1166,7 +1178,7 @@ try {
     }
     // Back goes back: follow the links between pages and try each in-app back control.
     await backPass(width, firstWidth ? 24 : 12);
-    // Sibling tabs: open each tab of a section and compare where the content starts and what sits on top.
+    // Sibling tabs, part 2: the sub-pages of one section (the tab strips were done page by page above).
     await tabPass(width);
   }
 } finally {

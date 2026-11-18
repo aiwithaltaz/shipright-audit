@@ -86,7 +86,9 @@ export async function settle(page, { timeout = 10000 } = {}) {
 // "Got it" often tells the app the owner has seen it, and then it never shows again on their account.
 // So the order is: Escape first, then the close (X) button, and a button named OK, Got it or Dismiss
 // only when neither worked. Nothing else is ever pressed: not Accept, not Agree, not Continue.
-// A dialog that asks for a password is the sign-in, not a notice: it is left alone.
+// A dialog that asks for a password is the sign-in, not a notice: it is left alone. A dialog about
+// cookies, consent, privacy or terms is never answered with its own button: pressing OK there would
+// agree to something on the owner's behalf. Escape and the close (X) button are still tried.
 // Every dialog closed is kept in dialogsClosed, with how, so the audit can say so in Left behind.
 export const dialogsClosed = [];
 export async function uncover(page, name = 'audit') {
@@ -103,9 +105,10 @@ export async function uncover(page, name = 'audit') {
     const close = [...d.querySelectorAll('button, [role=button], a')].find(b => vis2(b) && (/^(close|close dialog|close modal)$/i.test((b.getAttribute('aria-label') || b.getAttribute('title') || '').trim()) || /^[x\u00d7\u2715\u2716\u2573]$/i.test(text(b)) || (!text(b) && /close|dismiss-icon|x-mark|xmark/i.test((typeof b.className === 'string' ? b.className : '') + ' ' + ((b.querySelector('svg, use, i') || { getAttribute: () => '' }).getAttribute('class') || '')))));
     function vis2(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
     if (close) close.dataset.srdialogX = '1';
-    const last = [...d.querySelectorAll('button, [role=button]')].find(b => vis2(b) && /^(ok|okay|got it|dismiss)[.!]?$/i.test(text(b)));
+    const consent = /cookie|consent|privacy|gdpr|tracking|terms of|\bterms\b|agree/i.test(text(d));
+    const last = consent ? null : [...d.querySelectorAll('button, [role=button]')].find(b => vis2(b) && /^(ok|okay|got it|dismiss)[.!]?$/i.test(text(b)));
     if (last) last.dataset.srdialogOk = '1';
-    return { title: (d.getAttribute('aria-label') || by || (head && text(head)) || text(d)).slice(0, 60), x: !!close, ok: last ? text(last) : null };
+    return { title: (d.getAttribute('aria-label') || by || (head && text(head)) || text(d)).slice(0, 60), x: !!close, ok: last ? text(last) : null, consent };
   }).catch(() => null);
   const d = await find();
   if (!d) return null;
@@ -117,7 +120,7 @@ export async function uncover(page, name = 'audit') {
   else if (d.ok && await page.click('[data-srdialog-ok="1"]', { timeout: 2000 }).then(() => true).catch(() => false) && await gone()) entry.how = `the "${d.ok}" button`;
   dialogsClosed.push(entry);
   if (entry.how) console.error(`${name}: closed the "${d.title}" dialog that covered ${new URL(entry.page).pathname} with ${entry.how}. Say so in Left behind.`);
-  else console.error(`${name}: the "${d.title}" dialog covers ${new URL(entry.page).pathname} and did not close with Escape, a close (X) button, or OK, Got it or Dismiss. It was left open: the checks on this page may describe the dialog.`);
+  else console.error(`${name}: the "${d.title}" dialog covers ${new URL(entry.page).pathname} and did not close with Escape or a close (X) button${d.consent ? '. It asks for consent, so its own buttons were not pressed' : ', and it has no OK, Got it or Dismiss button'}. It was left open: the checks on this page may describe the dialog.`);
   return entry;
 }
 // For a script's JSON, and the lines for its report.

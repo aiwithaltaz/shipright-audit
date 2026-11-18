@@ -191,6 +191,8 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
     }
     const clean = visual('tests/fixtures/checks-app/clean.html').leads.filter(l => NEW.includes(l.kind));
     ok('the clean fixture page triggers none of the 5 new checks', clean.length === 0, clean.map(l => `${l.kind}: ${l.what.slice(0, 60)}`).join(' | ') || 'no leads');
+    // The 3 page checks added in 0.9 ride along on this sweep: they must stay quiet here too.
+    const QUIET = [...NEW, 'faint-border', 'tight-padding', 'see-through-layer'];
     const loud = [];
     let real = 0;
     const sweep = [...['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app', 'shift-app', 'use-app', 'results-app', 'button-cards-app'].map(f => [f, `tests/fixtures/${f}/index.html`, []]),
@@ -200,12 +202,12 @@ export async function run08(ok, { hasPw, only = [] } = {}) {
       ['benchmark s3', 'benchmarks/cases/s3-northwind-maintenance/app/index.html', ['--routes', '#/requests,#/urgent,#/properties,#/vendors']],
       ['benchmark c7', 'benchmarks/cases/c7-ivc-app/app/index.html', []]];
     for (const [name, target, extra] of sweep) {
-      for (const l of visual(target, extra).leads.filter(x => NEW.includes(x.kind))) {
+      for (const l of visual(target, extra).leads.filter(x => QUIET.includes(x.kind))) {
         if (name === 'benchmark s2' && l.kind === 'template-text' && /lorem ipsum/i.test(l.what) && l.pages.join() === '/index.html#/reports') real++;
         else loud.push(`${name}: ${l.kind} ${l.what.slice(0, 60)}`);
       }
     }
-    ok('the 5 new checks add 0 false alarms to the existing fixtures and benchmark apps', loud.length === 0 && real === 1, loud.join(' | ') || `${sweep.length} apps, 1 real lead (lorem ipsum on a benchmark's Reports page, in its answer key)`);
+    ok('the 5 new checks (and the 3 page checks added in 0.9) add 0 false alarms to the existing fixtures and benchmark apps', loud.length === 0 && real === 1, loud.join(' | ') || `${sweep.length} apps, 1 real lead (lorem ipsum on a benchmark's Reports page, in its answer key)`);
   }
 
   // Step 6. A marker you can set should be filterable. A list with star buttons and no "Starred" filter

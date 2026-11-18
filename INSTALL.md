@@ -24,7 +24,9 @@ Send these as two separate prompts:
 
 ### Updating
 
-Claude Code does not auto-update marketplaces outside Anthropic's own. The easy way: when a newer version is out, the audit says so at the end of its reply. Say "update it" and it fetches the new version for you; then restart, type `/plugin`, open **Installed**, pick **Shipright audit**, click **Update** and confirm.
+Claude Code does not auto-update marketplaces outside Anthropic's own. From 0.9 on the plugin does the fetching itself: each time Claude Code starts (terminal or desktop app), a `SessionStart` hook checks for a newer version. When one is out it refreshes the saved copy and says "ShipRight audit <new version> is ready: open Plugins and click Update." Then type `/plugin`, open **Installed**, pick **Shipright audit** and click **Update**. It says nothing when you are up to date or offline, takes under 3 seconds, and never stops a session. Turn it off with the environment variable `SHIPRIGHT_NO_UPDATE_CHECK=1`. To see whether it ran, set `SHIPRIGHT_UPDATE_LOG` to a file path: each start adds one line there. The hook arrives with 0.9, so the update from 0.8 to 0.9 is still done one of the ways below.
+
+If you are on an older version, or the hook is off: when a newer version is out, the audit says so at the end of its reply. Say "update it" and it fetches the new version for you; then restart, type `/plugin`, open **Installed**, pick **Shipright audit**, click **Update** and confirm.
 
 **Claude Code in a terminal:** type `/plugin`, open **Marketplaces**, pick **shipright-audit** and update it. You can also choose **Enable auto-update** there, so new versions arrive on their own.
 

@@ -106,4 +106,4 @@ One row per lead in `visual/visual.md` (V##), `explore/explore.md` (E##), `sampl
 
 | Where | What I created or changed | Removed? |
 |---|---|---|
-| <the app or the folder> | <every test message and test item, every switch flipped and turned back, a draft, Playwright packages, .session.json, the sign-in profile folder> | <yes, or no and why> |
+| <the app or the folder> | <every test message and test item, every switch flipped and whether it is back, back after a reload, or not back, every option picked and whether the first state is back, every dialog closed on load and how (Escape, the close button, or its own button), a draft, Playwright packages, .session.json, the sign-in profile folder> | <yes, or no and why> |

@@ -298,6 +298,22 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
         process.platform === 'win32' ? 'hook file checked (the shell run is skipped on Windows)' : `exit ${ran.status}: ${(shown && shown.systemMessage) || ran.stdout.trim().slice(0, 80) || ran.stderr.trim().slice(0, 80)}`);
     } else ok('update hook script: a stale copy is fetched once and the line is printed once, a current copy prints nothing', true, 'SKIPPED: git is not available');
   }
+
+  // The goal of 0.9: no new false alarms on the existing fixtures and benchmark apps. The page checks
+  // (faint-border, tight-padding, see-through-layer) are swept by tests/v08.mjs and tests/run.mjs. This
+  // sweeps the checks that live in explore.mjs over the older fixtures and all 4 benchmark apps.
+  if (want('quiet') && hasPw) {
+    const NEW = ['back-goes-elsewhere', 'tab-shift', 'tab-chrome-differs', 'option-vanished', 'option-not-restored', 'unlabeled-field', 'toggle-back-after-reload', 'duplicate-on-screen'];
+    const sweep = [...['shift-app', 'use-app', 'results-app', 'button-cards-app', 'marker-app', 'lifecycle-app', 'create-app'].map(f => [f, `tests/fixtures/${f}/index.html`, []]),
+      ['checks-app clean', 'tests/fixtures/checks-app/clean.html', []],
+      ['benchmark s1', 'benchmarks/cases/s1-pawsh-grooming/app/index.html', ['--routes', '#/services,#/book,#/bookings,#/bookings/past,#/contact,#/does-not-exist']],
+      ['benchmark s2', 'benchmarks/cases/s2-harvest-volunteers/app/index.html', ['--routes', '#/dashboard,#/shifts,#/shifts/s4,#/volunteers,#/settings,#/reports']],
+      ['benchmark s3', 'benchmarks/cases/s3-northwind-maintenance/app/index.html', ['--routes', '#/requests,#/urgent,#/properties,#/vendors']],
+      ['benchmark c7', 'benchmarks/cases/c7-ivc-app/app/index.html', []]];
+    const loud = [];
+    for (const [name, target, extra] of sweep) for (const l of explore(target, [...extra, '--widths', '1280']).json.leads.filter(x => NEW.includes(x.kind) || x.kind === 'did not run')) loud.push(`${name}: ${l.kind} ${String(l.what).slice(0, 80)}`);
+    ok('the checks added to explore.mjs in 0.9 add 0 false alarms to the older fixtures and the 4 benchmark apps', loud.length === 0, loud.join(' | ') || `${sweep.length} apps`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
