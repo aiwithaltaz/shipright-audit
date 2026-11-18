@@ -257,6 +257,47 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     const out = j => j.leads.filter(l => l.kind === 'overflow-box');
     ok('overflow-box: 6px outside a 358px card stays quiet, 114px outside is still a lead', out(small.json).length === 0 && small.json.leads.length === 0 && out(big.json).length === 1, `small: ${say(small.json.leads)}; big: ${say(out(big.json))}`);
   }
+
+  // Step 10. Updates without the manual steps. The plugin ships a SessionStart hook (hooks/hooks.json)
+  // that runs version.mjs --fetch --quiet. Against a stale saved copy of the marketplace it fetches once
+  // and prints the line once. Up to date, offline or switched off, it prints nothing. It always exits
+  // 0 and is done in under 3 seconds.
+  if (want('update')) {
+    const g = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+    const origin = tmp('v09-origin'), home = tmp('v09-home'), copy = join(home, '.claude', 'plugins', 'marketplaces', 'shipright-audit');
+    const put = (version) => { mkdirSync(join(origin, '.claude-plugin'), { recursive: true }); writeFileSync(join(origin, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'shipright-audit', version })); g(['add', '-A'], origin); g(['-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', version], origin); };
+    const made = g(['init', '-q', '-b', 'main'], origin).status === 0;
+    if (made) { put('0.1.0'); put('0.2.0'); }
+    if (made && g(['clone', '-q', origin, copy]).status === 0 && g(['reset', '-q', '--hard', 'HEAD~1'], copy).status === 0) {
+      const env = { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: '', CLAUDE_PLUGIN_ROOT: root };
+      const versionIn = () => readJson(join(copy, '.claude-plugin', 'plugin.json'), {}).version;
+      const timed = (extra = [], more = {}) => { const t = Date.now(); const r = runSync([S + 'version.mjs', '--fetch', '--quiet', ...extra], { ...env, ...more }); return { ...r, ms: Date.now() - t }; };
+      const off = timed([], { SHIPRIGHT_NO_UPDATE_CHECK: '1' });
+      const staleAfterOff = versionIn();
+      const first = timed(), second = timed();
+      ok('update hook script: a stale copy is fetched once and the line is printed once, a current copy prints nothing',
+        off.status === 0 && off.stdout === '' && staleAfterOff === '0.1.0' && first.status === 0 && first.stdout.trim() === 'ShipRight audit 0.2.0 is ready: open Plugins and click Update.' && versionIn() === '0.2.0' && second.status === 0 && second.stdout === '' && [off, first, second].every(r => r.ms < 3000),
+        `off: "${off.stdout.trim()}" · stale: "${first.stdout.trim()}" (${first.ms}ms) · current: "${second.stdout.trim()}"`);
+      // Offline: the remote cannot be reached. Nothing is printed, nothing fails, the copy is untouched.
+      g(['reset', '-q', '--hard', 'HEAD~1'], copy);
+      g(['remote', 'set-url', 'origin', join(origin, 'gone')], copy);
+      const offline = timed();
+      const none = timed([], { HOME: tmp('v09-nohome'), USERPROFILE: tmp('v09-nohome') });
+      ok('update hook script: offline or with no saved copy it prints nothing, exits 0 and stays under 3 seconds',
+        offline.status === 0 && offline.stdout === '' && versionIn() === '0.1.0' && offline.ms < 3000 && none.status === 0 && none.stdout === '', `offline: exit ${offline.status} in ${offline.ms}ms, "${offline.stdout.trim()}"`);
+      // The hook file itself: valid, on SessionStart, and its command runs as written (through a shell,
+      // with CLAUDE_PLUGIN_ROOT set, as Claude Code does) and shows the line to the user.
+      g(['remote', 'set-url', 'origin', origin], copy);
+      const hooks = readJson(join(root, 'hooks', 'hooks.json'), {});
+      const hook = hooks.hooks?.SessionStart?.[0]?.hooks?.[0] || {};
+      let shown = null, ran = { status: process.platform === 'win32' ? 0 : -1 };
+      if (process.platform !== 'win32') { ran = spawnSync('sh', ['-c', hook.command || 'exit 9'], { cwd: tmp('v09-cwd'), encoding: 'utf8', env: { ...process.env, ...env } }); try { shown = JSON.parse(ran.stdout); } catch {} }
+      ok('the plugin ships a SessionStart hook that runs the quiet fetch and shows the line to the user',
+        hook.type === 'command' && /version\.mjs" --fetch --quiet/.test(hook.command || '') && hook.command.includes('${CLAUDE_PLUGIN_ROOT}') && hook.timeout <= 5 && ran.status === 0
+        && (process.platform === 'win32' || (shown && shown.systemMessage === 'ShipRight audit 0.2.0 is ready: open Plugins and click Update.' && shown.hookSpecificOutput?.hookEventName === 'SessionStart')),
+        process.platform === 'win32' ? 'hook file checked (the shell run is skipped on Windows)' : `exit ${ran.status}: ${(shown && shown.systemMessage) || ran.stdout.trim().slice(0, 80) || ran.stderr.trim().slice(0, 80)}`);
+    } else ok('update hook script: a stale copy is fetched once and the line is printed once, a current copy prints nothing', true, 'SKIPPED: git is not available');
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
