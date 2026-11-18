@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Trip planner chat</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; background: #fff; color: #1c1c1c; }
+.top { position: sticky; top: 0; display: flex; justify-content: space-between; align-items: center; padding: 14px 24px; background: #fff; border-bottom: 1px solid #ddd; }
+.top strong { font-size: 16px; }
+main { max-width: 720px; margin: 0 auto; padding: 16px 24px 140px; }
+.msg { margin: 0 0 18px; line-height: 1.5; }
+.box { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 24px 16px; background: #fff; border-top: 1px solid #ddd; }
+.box form { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; }
+.box textarea { flex: 1; height: 48px; padding: 12px; border: 1px solid #8a8a84; border-radius: 10px; font: inherit; background: #fff; }
+.box button { height: 48px; padding: 0 16px; border: 0; border-radius: 10px; background: #1a56db; color: #fff; font: inherit; }
+.box small { display: block; max-width: 720px; margin: 8px auto 0; color: #55554f; }
+</style></head>
+<body>
+<header class="top"><strong>Trip planner</strong><span>Lisbon, 4 days</span></header>
+<main id="thread"></main>
+<div class="box">
+  <form onsubmit="return false"><textarea aria-label="Message" placeholder="Ask about your trip"></textarea><button type="submit">Send</button></form>
+  <small>Answers can be wrong. Check opening hours before you go.</small>
+</div>
+<script>
+  const lines = ['Day one starts at the river with a slow breakfast near the market hall.', 'Take tram 28 before ten, when the queue at the first stop is still short.', 'The tile museum is a short bus ride east and worth two hours.', 'Dinner in Alfama works best with a booking for eight.', 'Day two is a train to Sintra: leave before nine and buy the return ticket.', 'Walk up to the palace through the park, not along the road.', 'Back in town, the viewpoint at Graca is quiet at sunset.', 'Day three is for Belem: the monastery first, the tower after lunch.', 'The pastry shop next door has a second, faster line inside.', 'Day four is free: the flea market is open on Tuesday and Saturday.'];
+  const thread = document.getElementById('thread');
+  for (let i = 0; i < 40; i++) { const p = document.createElement('p'); p.className = 'msg'; p.textContent = lines[i % lines.length] + ' ' + lines[(i + 3) % lines.length]; thread.appendChild(p); }
+</script>
+</body>
+</html>

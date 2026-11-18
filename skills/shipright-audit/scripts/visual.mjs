@@ -6,7 +6,9 @@
 // (under 3:1), a chip or button that sticks out of its card, the same text or control twice on one
 // screen, and two stacked rows of controls that could be one row.
 // Since 0.9 also: inputs, dropdowns and outline buttons whose border is too faint to see (under 3:1), and
-// one card, notice or row with much tighter padding than the others like it.
+// one card, notice or row with much tighter padding than the others like it. And it scrolls the content
+// under every sticky and fixed layer (top bar, chip, message box, bottom bar): one with no solid
+// background, so the content shows through or prints over it, is a lead with a screenshot taken then.
 // Every finding gets a cropped screenshot when there is something to crop.
 // Usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit> [--routes "#/,#/library"]
 //        [--widths 1280,390] [--no-click]
@@ -27,7 +29,7 @@
 // Writes visual.json, visual.md and V##-*.png crops to --out (the skill passes <audit>/visual).
 // Findings are leads for the reviewer to confirm, not verdicts. Exit 0 ran, 2 usage or missing Playwright,
 // 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, auditPaths, landedOn, shootFinding, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, auditPaths, landedOn, shootFinding, checkLayers, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -122,6 +124,14 @@ try {
         await shootFinding(page, f, join(outDir, shot));
         findings.push({ id, page: url, width, kind: f.kind, what: f.what, group: f.group, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : null });
       }
+      // Sticky and fixed layers: scroll the content under each one and see whether it shows through.
+      let ln = n;
+      for (const f of await checkLayers(page, lf => join(outDir, `V${String(++ln).padStart(2, '0')}-${routeId}-see-through-${lf.detail.layer.replace(/\W+/g, '-')}${suffix}.png`)).catch(() => [])) {
+        const id = `V${String(++n).padStart(2, '0')}`;
+        const shot = `${id}-${routeId}-see-through-${f.detail.layer.replace(/\W+/g, '-')}${suffix}.png`;
+        findings.push({ id, page: url, width, kind: f.kind, what: f.what, group: f.group, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : null });
+      }
+      await page.evaluate(() => scrollTo(0, 0)).catch(() => {});
       let menus = [];
       if (!noClick) {
         const r = await openMenus(page, routeId, n, suffix);
@@ -178,7 +188,7 @@ for (const p of pages) for (const it of p.item_states || []) {
 }
 const itemStates = [...stateMap.values()].map(x => ({ item: x.item, states: [...x.states].sort(), pages: [...x.pages] }));
 writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, item_states: itemStates, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
-const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one', 'faint-border': 'Component outline too faint to see', 'tight-padding': 'Padding much tighter than the others' };
+const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one', 'faint-border': 'Component outline too faint to see', 'tight-padding': 'Padding much tighter than the others', 'see-through-layer': 'Content shows through a sticky or fixed layer' };
 const md = ['# Visual checks', '', `${pages.length} page(s) at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
 const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));

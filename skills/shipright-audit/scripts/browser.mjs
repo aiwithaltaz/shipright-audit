@@ -379,6 +379,45 @@ export function analyzeScript(opts = {}) {
   return `(() => { ${analyzeSrc}\n return SHIPRIGHT_ANALYZE(${JSON.stringify(opts)}); })()`;
 }
 
+// Sticky and fixed layers need a solid background (analyze-page.js, SHIPRIGHT_LAYERS). The check reads
+// the page as it is scrolled, so this scrolls the content under each layer first: a few stops down the
+// page and down every box that scrolls. A bar that turns solid once the page scrolls gets the time to
+// do so. Each lead is screenshotted while the content is under the layer, then the scroll is put back.
+// shotFor(finding) gives the file to write. Returns the findings (kind "see-through-layer").
+export async function checkLayers(page, shotFor) {
+  analyzeSrc ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'analyze-page.js'), 'utf8');
+  const script = `(() => { ${analyzeSrc}\n return SHIPRIGHT_LAYERS(); })()`;
+  const first = await page.evaluate(script).catch(() => null);
+  if (!first || !first.open || !first.scrollers.length) return [];
+  const scrollTo = ([mark, y]) => { const el = mark === 'document' ? (document.scrollingElement || document.documentElement) : document.querySelector(`[data-srs="${mark}"]`); if (el) el.scrollTop = y; };
+  const best = new Map();
+  for (const sc of first.scrollers) {
+    const stops = [...new Set([0, 80, 200, sc.max / 2, sc.max - 200, sc.max - 80, sc.max].map(v => Math.round(Math.max(0, Math.min(sc.max, v)))))];
+    for (const top of stops) {
+      await page.evaluate(scrollTo, [sc.mark, top]).catch(() => {});
+      await page.waitForTimeout(220);
+      const res = await page.evaluate(script).catch(() => null);
+      for (const f of (res ? res.findings : [])) { const have = best.get(f.mark); if (!have || f.detail.overlap_px > have.f.detail.overlap_px) best.set(f.mark, { f, sc, top }); }
+    }
+    await page.evaluate(scrollTo, [sc.mark, sc.top]).catch(() => {});
+  }
+  const out = [];
+  for (const { f, sc, top } of best.values()) {
+    await page.evaluate(scrollTo, [sc.mark, top]).catch(() => {});
+    await page.waitForTimeout(220);
+    const size = page.viewportSize() || { width: 1280, height: 800 };
+    const box = await page.evaluate(m => { const el = document.querySelector(`[data-srlayer="${m}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }, f.mark).catch(() => null) || f.box;
+    const y = Math.max(0, box.y - 60), x = Math.max(0, box.x - 12);
+    const clip = { x, y, width: Math.max(2, Math.min(size.width - x, box.width + 24)), height: Math.max(2, Math.min(size.height - y, box.height + 120)) };
+    const file = shotFor ? shotFor(f) : null;
+    const shot = file ? await page.screenshot({ path: file, clip }).then(() => true).catch(() => false) : false;
+    await page.evaluate(scrollTo, [sc.mark, sc.top]).catch(() => {});
+    const { box: _b, mark: _m, ...rest } = f;
+    out.push({ ...rest, detail: { ...f.detail, scrolled_to: top }, shot_written: shot });
+  }
+  return out;
+}
+
 // The crop for a finding: its own box when the check gave one (a problem wider than one element, like
 // a chip outside its card), else the element it marked. Returns true when a file was written.
 export async function shootFinding(page, f, file) {

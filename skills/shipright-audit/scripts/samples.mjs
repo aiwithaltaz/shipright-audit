@@ -29,7 +29,7 @@
 // Writes samples.json, samples.md, R-<list>-<item>-<width>.png page screenshots and R##-*.png crops to
 // --out (the skill passes <audit>/samples). Leads are R##: decide each one in the pain map's Script leads.
 // Exit 0 ran, 2 usage or missing Playwright, 3 the app signed us out.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, auditPaths, landedOn, shootFinding, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, linkPattern, settle, normUrl, auditPaths, landedOn, shootFinding, checkLayers, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -258,6 +258,14 @@ try {
         const id = `R${String(++n).padStart(2, '0')}`;
         const shot = `${id}-${f.kind}-${width}.png`;
         await shootFinding(page, f, join(outDir, shot));
+        findings.push({ id, page: it.url, width, kind: f.kind, what: f.what, group: f.group, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : file });
+      }
+      // A page that holds a real result is long enough to scroll: does it show through the top bar
+      // or print over the message box on its way?
+      let ln = n;
+      for (const f of await checkLayers(page, () => join(outDir, `R${String(++ln).padStart(2, '0')}-see-through-layer-${width}.png`)).catch(() => [])) {
+        const id = `R${String(++n).padStart(2, '0')}`;
+        const shot = `${id}-see-through-layer-${width}.png`;
         findings.push({ id, page: it.url, width, kind: f.kind, what: f.what, group: f.group, detail: f.detail, shot: existsSync(join(outDir, shot)) ? shot : file });
       }
     }

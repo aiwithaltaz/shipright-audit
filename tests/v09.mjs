@@ -98,6 +98,18 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
       leads.length === 1 && /One card has much tighter padding than the others like it: 4px, where the 4 others use 16px/.test(leads[0].what) && /Finance/.test(leads[0].what) && leads[0].widths.join() === '1280,390' && !!leads[0].shot && existsSync(join(odd.o, leads[0].shot)), say(leads));
     ok('tight-padding: 5 cards at 16px give none', same.json.leads.length === 0, say(same.json.leads));
   }
+
+  // Step 5. Sticky and fixed layers need a solid background. A long page with a transparent sticky top
+  // bar and a transparent fixed message box: 2 leads, each with a screenshot taken while the content
+  // is under the layer. The same page with solid backgrounds gives none.
+  if (want('layers') && hasPw) {
+    const bare = visual('tests/fixtures/layers-app/index.html', ['--no-click']), solid = visual('tests/fixtures/layers-app/solid.html', ['--no-click']);
+    const leads = bare.json.leads.filter(l => l.kind === 'see-through-layer');
+    const by = w => leads.find(l => l.detail.layer === w) || { what: '', widths: [] };
+    ok('see-through-layer: a transparent sticky top bar and a transparent fixed message box are 2 leads',
+      leads.length === 2 && /prints over it/.test(by('message box').what) && /has no background/.test(by('top bar').what) && leads.every(l => l.widths.join() === '1280,390' && l.shot && existsSync(join(bare.o, l.shot)) && l.detail.scrolled_to > 0), say(leads));
+    ok('see-through-layer: the same page with solid backgrounds gives none', solid.json.leads.length === 0, say(solid.json.leads));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -37,6 +37,12 @@
 //                        more with the surface needs no visible border.
 //   tight-padding        one card, notice or row whose inner padding is under 60% of what the others
 //                        like it use, or under 8px while they use 12px or more
+// One more check lives in a second function at the end of this file, SHIPRIGHT_LAYERS (V16):
+//   see-through-layer    a sticky or fixed layer (top bar, chip, message box, bottom bar) with no solid
+//                        background, while page content sits under it. It looks at the page as it is
+//                        scrolled right now, so visual.mjs and samples.mjs scroll the content under each
+//                        layer first. By hand: scroll until content is under the bar, then run
+//                        "JSON.stringify(SHIPRIGHT_LAYERS())" after pasting this file.
 // A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
 // It also returns "item_states": the status labels seen on repeated items ("Editing", "Rendering", "Ready").
 // Not a lead: an item type with 3 or more states needs an Item lifecycles table in the pain map (Step 2b).
@@ -952,4 +958,168 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
   const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
   return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, item_states: itemStates, title: document.title, width: document.documentElement.clientWidth };
+};
+
+// ---- Sticky and fixed layers need a solid background (new in 0.9) -----------------------------------
+// Looks at the page as it is scrolled right now. For every element with position sticky or fixed that
+// sits over the page (a top bar, a chip, a message box, a bottom bar) it asks: is page content painted
+// inside its box with nothing solid in between?
+//   - The layer has a background that is not solid (under 90% opaque): any page text inside its box
+//     shows through.
+//   - The layer has no background at all, and holds words or controls with nothing solid behind them:
+//     page text inside its box shows, and prints over those words when it passes behind them.
+//     (A bare wrapper around solid parts is not a lead: a floating button with its own fill is fine.)
+// Skipped: a layer with a picture or gradient behind it (a fade is drawn on purpose), a blur of 4px
+// or more (frosted glass: the text underneath cannot be read), dialogs, menus, tooltips, toasts, a
+// layer that covers most of the screen, and side panels (content sits beside them, not under).
+// Returns { layers, open, scrollers, findings }. "scrollers" lists what can be scrolled, so a script
+// can move content under each layer and ask again. Each finding carries "box": the layer's place on
+// screen, for a screenshot taken while the content is under it.
+var SHIPRIGHT_LAYERS = () => {
+  const vw = innerWidth, vh = innerHeight;
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.02; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  let ctx = null;
+  const cache = new Map();
+  const rgba = value => {
+    if (!value) return null;
+    if (cache.has(value)) return cache.get(value);
+    let out = null;
+    const m = String(value).match(/^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/);
+    if (m) out = { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : +m[4]) };
+    else { try { if (!ctx) { const cv = document.createElement('canvas'); cv.width = cv.height = 1; ctx = cv.getContext('2d', { willReadFrequently: true }); } ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; out = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }; } catch (e) { out = null; } }
+    cache.set(value, out);
+    return out;
+  };
+  const blurOf = cs => { const m = String(cs.backdropFilter || cs.webkitBackdropFilter || '').match(/blur\(([\d.]+)px\)/); return m ? parseFloat(m[1]) : 0; };
+  const AWAY = '[role=dialog], dialog, [aria-modal=true], [role=tooltip], [role=menu], [role=listbox], [popover], [role=alert], [class*=toast i], [class*=snackbar i], [class*=tooltip i]';
+  const mark = el => { if (!el.dataset.srlayer) { window.__srLayerN = (window.__srLayerN || 0) + 1; el.dataset.srlayer = 'L' + window.__srLayerN; } return el.dataset.srlayer; };
+
+  // 1. The layers.
+  const layers = [];
+  const lifted = new WeakMap(); // element -> is it inside a fixed or sticky element?
+  const isLifted = el => {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    if (lifted.has(el)) return lifted.get(el);
+    const p = getComputedStyle(el).position;
+    const v = p === 'fixed' || p === 'sticky' || isLifted(el.parentElement);
+    lifted.set(el, v);
+    return v;
+  };
+  for (const el of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+    if (!vis(el) || el.closest(AWAY) || parseInt(cs.zIndex, 10) < 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 16 || r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) continue;
+    if (r.width * r.height > vw * vh * 0.5 || (r.height > vh * 0.7 && r.width < vw * 0.5)) continue;
+    if (layers.some(l => l.el.contains(el))) continue;
+    layers.push({ el, r, cs, sticky: cs.position === 'sticky' });
+  }
+
+  // 2. What can scroll: the page, and boxes that scroll inside it.
+  const scrollers = [];
+  const doc = document.scrollingElement || document.documentElement;
+  if (doc.scrollHeight - doc.clientHeight > 40) scrollers.push({ mark: 'document', max: doc.scrollHeight - doc.clientHeight, top: Math.round(doc.scrollTop), area: vw * vh });
+  for (const el of document.querySelectorAll('body *')) {
+    if (el.scrollHeight - el.clientHeight <= 40 || el.clientHeight < 120) continue;
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy !== 'auto' && oy !== 'scroll') || !vis(el) || el.closest(AWAY)) continue;
+    if (!el.dataset.srs) { window.__srScrollN = (window.__srScrollN || 0) + 1; el.dataset.srs = 'S' + window.__srScrollN; }
+    scrollers.push({ mark: el.dataset.srs, max: el.scrollHeight - el.clientHeight, top: Math.round(el.scrollTop), area: el.clientWidth * el.clientHeight });
+  }
+  scrollers.sort((a, b) => b.area - a.area);
+
+  // 3. For each layer: is it solid? If not, where is it open?
+  const fadeTo = (node, root) => { let o = 1; for (let x = node; x; x = x.parentElement) { o *= Number(getComputedStyle(x).opacity); if (x === root) break; } return o; };
+  // What sits between a node inside the layer and the page behind it: 'solid', 'image', 'blur' or null.
+  const cover = (node, root) => {
+    for (let x = node; x; x = x.parentElement) {
+      const cs = getComputedStyle(x);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return 'image';
+      const c = rgba(cs.backgroundColor);
+      if (c && c.a * fadeTo(x, root) >= 0.9) return 'solid';
+      if (blurOf(cs) >= 4) return 'blur';
+      if (x === root) break;
+    }
+    return null;
+  };
+  const open = [];
+  for (const l of layers) {
+    const c = rgba(l.cs.backgroundColor) || { a: 0 };
+    const alpha = c.a * Number(l.cs.opacity);
+    if ((l.cs.backgroundImage && l.cs.backgroundImage !== 'none') || alpha >= 0.9 || blurOf(l.cs) >= 4) continue;
+    const edged = ['Top', 'Right', 'Bottom', 'Left'].some(sd => parseFloat(l.cs[`border${sd}Width`]) > 0 && l.cs[`border${sd}Style`] !== 'none' && ((rgba(l.cs[`border${sd}Color`]) || { a: 0 }).a > 0.05)) || (l.cs.boxShadow && l.cs.boxShadow !== 'none');
+    // The layer's own words and controls that have nothing solid behind them.
+    const ink = [];
+    const range = document.createRange();
+    const walker = document.createTreeWalker(l.el, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (!t.textContent.trim() || !t.parentElement || !vis(t.parentElement) || cover(t.parentElement, l.el)) continue;
+      range.selectNodeContents(t);
+      const r = range.getBoundingClientRect();
+      if (r.width >= 4 && r.height >= 4) ink.push(r);
+    }
+    for (const x of l.el.querySelectorAll('input:not([type=hidden]), textarea, select, button, [role=button], [contenteditable="true"], [role=textbox]')) if (vis(x) && !cover(x, l.el)) ink.push(x.getBoundingClientRect());
+    // Parts of the layer that are solid by themselves (a filled button inside a bare wrapper).
+    const solids = [...l.el.querySelectorAll('*')].filter(x => vis(x) && cover(x, x) === 'solid').map(x => x.getBoundingClientRect());
+    // A bar with a see-through fill, an edge, or words of its own is a box: page text anywhere inside
+    // it shows. A bare wrapper around solid parts (a floating button) is not.
+    if (alpha > 0.02 || edged || ink.length) open.push({ ...l, alpha, box: true, ink, solids });
+  }
+
+  // 4. Page text that is on screen right now, cut to what its scrolling boxes let through.
+  const findings = [];
+  if (open.length) {
+    const seen = r => { for (const l of open) if (r.right > l.r.left && r.left < l.r.right && r.bottom > l.r.top && r.top < l.r.bottom) return true; return false; };
+    const clip = (el, r) => {
+      let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+      for (let x = el; x && x !== document.documentElement && x !== document.body; x = x.parentElement) {
+        const cs = getComputedStyle(x);
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') { const k = x.getBoundingClientRect(); left = Math.max(left, k.left); top = Math.max(top, k.top); right = Math.min(right, k.right); bottom = Math.min(bottom, k.bottom); }
+        if (Number(cs.opacity) < 0.1 || cs.visibility === 'hidden') return null;
+      }
+      return right - left > 0 && bottom - top > 0 ? { left, top, right, bottom } : null;
+    };
+    const content = [];
+    const range = document.createRange();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const words = t.textContent.replace(/\s+/g, ' ').trim();
+      const p = t.parentElement;
+      if (words.length < 2 || !p || p.closest('script, style, noscript, template, [aria-hidden="true"]')) continue;
+      range.selectNodeContents(t);
+      const r0 = range.getBoundingClientRect();
+      if (r0.width < 4 || r0.height < 4 || r0.bottom <= 0 || r0.top >= vh || !seen(r0)) continue;
+      if (isLifted(p) || p.closest(AWAY) || !vis(p)) continue;
+      const r = clip(p, r0);
+      if (r) content.push({ r, words });
+    }
+    for (const l of open) {
+      let area = 0;
+      const texts = [];
+      let how = null;
+      for (const c of content) {
+        const hit = b => { const w = Math.min(c.r.right, b.right) - Math.max(c.r.left, b.left), h = Math.min(c.r.bottom, b.bottom) - Math.max(c.r.top, b.top); return w >= 8 && h >= 4 ? { w, h, x: Math.max(c.r.left, b.left) + w / 2, y: Math.max(c.r.top, b.top) + h / 2 } : null; };
+        let got = null;
+        for (const i of l.ink) { const h = hit(i); if (h) { got = h; how = 'prints over'; break; } }
+        if (!got && l.box) { const h = hit(l.r); if (h && h.w >= 12 && h.h >= 6 && !l.solids.some(s => h.x >= s.left && h.x <= s.right && h.y >= s.top && h.y <= s.bottom)) { got = h; how = how || 'shows through'; } }
+        if (!got) continue;
+        area += got.w * got.h;
+        if (!texts.includes(c.words)) texts.push(c.words);
+      }
+      if (!texts.length || area < 150) continue;
+      const wide = l.r.width >= vw * 0.6;
+      const word = l.el.querySelector('textarea, [contenteditable="true"], [role=textbox]') || l.el.matches('textarea, form') ? 'message box'
+        : l.el.matches('th, thead, tr') ? 'table header'
+        : wide && l.r.top <= 12 ? 'top bar' : wide && l.r.bottom >= vh - 12 ? 'bottom bar'
+        : /^H[1-6]$/.test(l.el.tagName) ? 'sticky heading' : l.r.width < 240 ? 'floating chip' : l.sticky ? 'sticky bar' : 'fixed bar';
+      const bg = l.alpha <= 0.02 ? 'no background' : `a see-through background (${Math.round(l.alpha * 100)}% opaque)`;
+      findings.push({ kind: 'see-through-layer', group: `see-through|${word}`, mark: mark(l.el),
+        what: `Content scrolls under the ${word} and ${how === 'prints over' ? 'prints over it' : 'shows through it'}: "${texts[0].slice(0, 60)}" can be read inside it, because the ${word} has ${bg}`,
+        detail: { layer: word, name: text(l.el).slice(0, 60), position: l.sticky ? 'sticky' : 'fixed', background: l.alpha <= 0.02 ? 'none' : `${Math.round(l.alpha * 100)}% opaque`, how, overlap_px: Math.round(area), texts: texts.slice(0, 4).map(t => t.slice(0, 80)) },
+        box: { x: Math.round(l.r.left), y: Math.round(l.r.top), width: Math.round(l.r.width), height: Math.round(l.r.height) } });
+    }
+  }
+  return { layers: layers.length, open: open.length, scrollers: scrollers.slice(0, 4).map(({ area, ...x }) => x), findings };
 };
