@@ -27,7 +27,7 @@
 //   duplicate-on-screen  the same text block (40 characters or more) in two sections, or the same
 //                        control in two navigations
 //   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
-// Added in 0.9 (V14 in references/visual-craft.md):
+// Two checks added in 0.9 (V14 and V15 in references/visual-craft.md):
 //   faint-border         an input, dropdown, checkbox, radio button or outline button whose only boundary
 //                        is its border, with under 3:1 between that border and the surface behind it
 //                        (WCAG 1.4.11), and so close to it that the eye cannot find it (a lightness
@@ -35,6 +35,8 @@
 //                        gray border on white scores 13 or more and is not a lead). Reported with the
 //                        colors: "#3A3C39 on #2A2C29, 1.3:1". A component whose fill contrasts at 3:1 or
 //                        more with the surface needs no visible border.
+//   tight-padding        one card, notice or row whose inner padding is under 60% of what the others
+//                        like it use, or under 8px while they use 12px or more
 // A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
 // It also returns "item_states": the status labels seen on repeated items ("Editing", "Rendering", "Ready").
 // Not a lead: an item type with 3 or more states needs an Item lifecycles table in the pain map (Step 2b).
@@ -743,6 +745,88 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
       const others = faint.slice(1, 4).map(x => `${x.word}${x.name ? ` "${x.name}"` : ''} ${x.border} on ${x.surface}, ${x.ratio.toFixed(1)}:1`);
       add({ kind: 'faint-border', group: 'faint-border', what: `${faint.length === 1 ? `The outline of ${/^[aeiou]/.test(f.word) ? 'an' : 'a'} ${f.word} is` : `The outlines of ${faint.length} controls (${kinds.join(', ')}) are`} hard to see: the border of the ${f.word}${f.name ? ` "${f.name}"` : ''} is ${f.border} on ${f.surface}, ${f.ratio.toFixed(1)}:1 (component borders need 3:1)${others.length ? `. Also: ${others.join('; ')}` : ''}`,
         detail: { count: faint.length, lowest: f.ratio, items: faint.slice(0, 10).map(x => ({ kind: x.word, name: x.name, border: x.border, background: x.surface, contrast: x.ratio, lightness_contrast: x.lc })) }, crop: pageBox([f.el.getBoundingClientRect()], 24) }, f.el);
+    }
+  }
+
+  // ---- Tight padding: one surface with much less inner padding than the others like it ---------------
+  // Surfaces of one kind (cards, notices, list rows, settings rows: the same tag, fill, border, corner
+  // and shadow, side by side) should keep their content the same distance from the edge. The padding
+  // is measured: from the box edge to the nearest text, control or small image, on the left and on the
+  // top. A picture that fills the box edge to edge does not count. A lead when one surface's padding
+  // is under 60% of the median of the others, or under 8px while the others use 12px or more.
+  {
+    const AWAY = 'nav, header, footer, table, [role=tablist], [role=menu], [role=listbox], [role=tooltip], [role=dialog], dialog, button, [role=button], select, textarea, label, svg';
+    const TAGS = new Set(['DIV', 'LI', 'SECTION', 'ARTICLE', 'A', 'ASIDE', 'DETAILS', 'FIELDSET', 'P', 'DL', 'BLOCKQUOTE']);
+    const look = el => {
+      const cs = getComputedStyle(el);
+      const sides = ['Top', 'Right', 'Bottom', 'Left'].filter(sd => parseFloat(cs[`border${sd}Width`]) > 0 && cs[`border${sd}Style`] !== 'none' && ((rgba(cs[`border${sd}Color`]) || { a: 0 }).a > 0.05)).length;
+      const own = rgba(cs.backgroundColor), behind = backdrop(el);
+      const shadow = !!cs.boxShadow && cs.boxShadow !== 'none';
+      let filled = false;
+      if (own && own.a >= 0.05 && behind) { const seen = over(own, behind); filled = Math.abs(seen.r - behind.r) + Math.abs(seen.g - behind.g) + Math.abs(seen.b - behind.b) > 12; }
+      if (!(sides >= 3 || shadow || filled)) return null;
+      return `${el.tagName}|${cs.backgroundColor}|${sides}|${cs.borderTopWidth} ${cs.borderTopColor}|${Math.round(radius(el))}|${shadow}`;
+    };
+    const bySig = new Map();
+    for (const el of document.querySelectorAll('body *')) {
+      if (!TAGS.has(el.tagName) || el.closest(AWAY) || !inScope(el) || !shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 120 || r.height < 40 || r.height > 900 || isPill(el)) continue;
+      const k = look(el);
+      if (k) (bySig.get(k) || bySig.set(k, []).get(k)).push(el);
+    }
+    // Sets of 3 or more: siblings first, then cousins (cards in the columns of one grid).
+    const sets = [];
+    for (const els of bySig.values()) {
+      const cluster = (list, up) => { const m = new Map(); for (const el of list) { const k = up(el); if (k) (m.get(k) || m.set(k, []).get(k)).push(el); } return [...m.values()]; };
+      const loose = [];
+      for (const list of cluster(els, el => el.parentElement)) (list.length >= 3 ? sets.push(list) : loose.push(...list));
+      for (const list of cluster(loose, el => el.parentElement && el.parentElement.parentElement)) if (list.length >= 3) sets.push(list);
+    }
+    // Inner padding: how far the nearest content sits from the left and top edges.
+    const inset = el => {
+      const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      const x0 = b.left + (parseFloat(cs.borderLeftWidth) || 0), y0 = b.top + (parseFloat(cs.borderTopWidth) || 0);
+      const lifted = n => { for (let x = n; x && x !== el; x = x.parentElement) { const p = getComputedStyle(x).position; if (p === 'absolute' || p === 'fixed') return true; } return false; };
+      let left = Infinity, top = Infinity, n = 0;
+      const take = r => { if (r.width < 2 || r.height < 2) return; left = Math.min(left, r.left - x0); top = Math.min(top, r.top - y0); n++; };
+      const range = document.createRange();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!t.textContent.trim() || !t.parentElement || !vis(t.parentElement) || lifted(t.parentElement)) continue;
+        range.selectNodeContents(t);
+        take(range.getBoundingClientRect());
+      }
+      for (const x of el.querySelectorAll('input:not([type=hidden]), select, textarea, button, img, svg, video, canvas')) {
+        if (!vis(x) || lifted(x)) continue;
+        const r = x.getBoundingClientRect();
+        // A picture that runs edge to edge is not padded content.
+        if (x.matches('img, video, canvas, svg') && (r.width >= b.width * 0.9 || (r.left - x0 <= 1 && r.top - y0 <= 1))) continue;
+        take(r);
+      }
+      return n ? Math.max(0, Math.round(Math.min(left, top))) : null;
+    };
+    const median = xs => { const a = xs.slice().sort((p, q) => p - q); return a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2; };
+    const tight = [];
+    for (const set of sets) {
+      const pads = set.map(el => ({ el, pad: inset(el) })).filter(x => x.pad !== null);
+      if (pads.length < 3) continue;
+      const odd = [];
+      for (const m of pads) {
+        const rest = pads.filter(x => x !== m).map(x => x.pad), med = median(rest);
+        // The others must agree with each other, or there is no usual padding to compare with.
+        if (rest.filter(v => Math.abs(v - med) <= Math.max(3, med * 0.25)).length < Math.ceil(rest.length * 0.6)) continue;
+        if ((med >= 8 && m.pad < med * 0.6 && med - m.pad >= 4) || (m.pad < 8 && med >= 12)) odd.push({ ...m, med: Math.round(med), others: rest.length });
+      }
+      if (odd.length && odd.length <= Math.max(1, Math.floor(pads.length / 3))) for (const o of odd) tight.push({ ...o, normal: pads.filter(x => !odd.some(y => y.el === x.el)).sort((p, q) => Math.abs(p.el.getBoundingClientRect().top - o.el.getBoundingClientRect().top) - Math.abs(q.el.getBoundingClientRect().top - o.el.getBoundingClientRect().top))[0] });
+    }
+    if (tight.length) {
+      tight.sort((a, b) => (a.pad / a.med) - (b.pad / b.med));
+      const t = tight[0], r = t.el.getBoundingClientRect();
+      const word = t.el.matches('[role=alert], [role=status], [role=note], [class*=notice i], [class*=alert i], [class*=banner i], [class*=callout i]') ? 'notice' : (t.el.tagName === 'LI' || r.width >= r.height * 5) ? 'row' : 'card';
+      const both = t.normal ? pageBox([r, t.normal.el.getBoundingClientRect()], 12) : null;
+      add({ kind: 'tight-padding', group: 'tight-padding', what: `One ${word} has much tighter padding than the others like it: ${t.pad}px, where the ${t.others} others use ${t.med}px${describe(t.el).includes('"') ? ` (${describe(t.el).slice(0, 70)})` : ''}${tight.length > 1 ? ` (and ${tight.length - 1} more like it)` : ''}`,
+        detail: { count: tight.length, items: tight.slice(0, 5).map(x => ({ what: describe(x.el).slice(0, 80), padding_px: x.pad, others_px: x.med, others: x.others })) }, crop: both && both.height <= 1000 ? both : pageBox([r], 12) }, t.el);
     }
   }
 

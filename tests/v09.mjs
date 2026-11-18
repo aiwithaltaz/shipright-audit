@@ -88,6 +88,16 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     ok('faint-border: the same input with a contrasting fill gives none, and light gray borders on white give none',
       !filled.json.leads.some(l => l.kind === 'faint-border') && !light.json.leads.some(l => l.kind === 'faint-border'), say([...filled.json.leads, ...light.json.leads]));
   }
+
+  // Step 4. Tight padding. 4 cards at 16px padding and 1 at 4px: 1 lead that shows the odd one next
+  // to a normal one. 5 cards at 16px give none.
+  if (want('padding') && hasPw) {
+    const odd = visual('tests/fixtures/craft-app/padding.html', ['--no-click']), same = visual('tests/fixtures/craft-app/padding-same.html', ['--no-click']);
+    const leads = odd.json.leads.filter(l => l.kind === 'tight-padding');
+    ok('tight-padding: 4 cards at 16px and 1 at 4px is 1 lead, with the odd card and a normal one in the crop',
+      leads.length === 1 && /One card has much tighter padding than the others like it: 4px, where the 4 others use 16px/.test(leads[0].what) && /Finance/.test(leads[0].what) && leads[0].widths.join() === '1280,390' && !!leads[0].shot && existsSync(join(odd.o, leads[0].shot)), say(leads));
+    ok('tight-padding: 5 cards at 16px give none', same.json.leads.length === 0, say(same.json.leads));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
