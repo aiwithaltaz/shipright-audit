@@ -27,7 +27,7 @@ Check: the same action has the same label, look and place everywhere. Platform p
 Pain example: "Save" on one screen, "Submit" on another, for the same action.
 
 **H5. Prevent errors.**
-Check: invalid choices are blocked up front (disabled dates, input masks, limits shown). Requirements appear before the user starts, not at the end.
+Check: invalid choices are blocked up front (disabled dates, input masks, limits shown). Requirements appear before the user starts, not at the end. Before you call something a hidden requirement (an account, a key, a provider), search the page and its FAQ for words that say it is optional or one choice of several ("or", "any", "your own key", "optional"). If they are there, it is not a hidden requirement.
 Pain example: a date picker allows dates the business cannot serve.
 
 **H6. Show, do not make users remember.**

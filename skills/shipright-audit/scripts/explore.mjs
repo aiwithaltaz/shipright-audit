@@ -54,6 +54,15 @@
 //     screen that open the same menu, or menus whose options are over 80% the same, are one
 //     "duplicate-on-screen" lead: "Two controls do the same job here: A and B both open ...".
 //     Menus on the rows of one list (the same menu on every row) are not duplicates.
+// And two checks that stop false alarms (new in 0.9):
+//   - Floating labels are labels. A field with no label beside or above it is focused and 1 character
+//     is typed, then deleted: if its label (or the text that sat in the box) is still in view above
+//     the typed text, the field has a visible label. Only when nothing names the field while typing is
+//     it an "unlabeled-field" lead. On a live app it types only into sign-in and search fields,
+//     never submits, and judges the other fields without typing. Search boxes and message boxes are
+//     not reported: a lone box with a hint is the usual pattern there.
+//   - A rail that opens on hover counts as labeled. When hovering an icon-only control makes its text
+//     label appear (the rail grows, or the full sidebar opens), no "no-tooltip" lead is reported.
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -805,6 +814,126 @@ const ROW_OF = (sel) => {
   }
   return null;
 };
+// ---- Fields with no visible label ---------------------------------------------------------------
+// Every text field on the page, with what names it for a sighted user right now.
+const FIND_FIELDS = () => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const FIELD = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]):not([type=range]):not([type=color]), textarea';
+  const all = [...document.querySelectorAll(FIELD)].filter(el => vis(el) && !el.disabled && !el.readOnly && !el.closest('[role=dialog], dialog, [aria-hidden="true"]'));
+  document.querySelectorAll('[data-srf]').forEach(el => { delete el.dataset.srf; });
+  const out = [];
+  all.forEach((el, i) => {
+    el.dataset.srf = String(i);
+    const r = el.getBoundingClientRect();
+    const hint = (el.getAttribute('placeholder') || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const form = el.closest('form') || el.parentElement.parentElement || el.parentElement;
+    const peers = [...form.querySelectorAll(FIELD)].filter(vis);
+    const search = el.type === 'search' || el.getAttribute('role') === 'searchbox' || !!el.closest('[role=search]') || /search|find|filter/i.test(`${hint} ${el.id} ${el.name || ''}`);
+    // A lone box with a send button (a message box, a subscribe box) is named by that button.
+    const lone = peers.length === 1 && (el.tagName === 'TEXTAREA' || !!form.querySelector('button, [role=button], input[type=submit]'));
+    const signIn = !!form.querySelector('input[type=password]') || el.type === 'password' || /login|sign-?in|signin|log-?in/i.test(location.pathname + location.hash);
+    // A label next to the field: its own <label>, the text it is labelled by, or plain text that sits
+    // right above it or to its left. Text that lies over the box (a floating label) is noted apart.
+    const lab = (el.labels && [...el.labels].find(l => vis(l) && text(l))) || null;
+    const by = (el.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)).filter(x => x && vis(x) && text(x))[0] || null;
+    const over = b => b.left < r.right - 4 && b.right > r.left + 4 && b.top < r.bottom - 2 && b.bottom > r.top + 2;
+    let beside = false, floating = null;
+    for (const cand of [lab, by].filter(Boolean)) {
+      // The label's own words, not the field it wraps.
+      const range = document.createRange();
+      const node = [...cand.childNodes].find(n => n.nodeType === 3 && n.textContent.trim()) || [...cand.querySelectorAll('*')].find(x => !x.contains(el) && x !== el && vis(x) && text(x)) || cand;
+      range.selectNodeContents(node);
+      const b = range.getBoundingClientRect();
+      if (b.width < 2) continue;
+      if (over(b)) floating = text(node.nodeType === 3 ? node.parentElement : node).replace(el.value || '\u0000', '').slice(0, 40) || 'label'; else beside = true;
+    }
+    if (!beside && !floating) {
+      // Plain text near the field that is not tied to it in the code.
+      const scope = el.closest('form, fieldset, section, main, [class*=field i], [class*=form i]') || document.body;
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        const words = t.textContent.replace(/\s+/g, ' ').trim();
+        const p = t.parentElement;
+        if (words.length < 2 || !p || !vis(p) || p === el || p.closest('button, [role=button], a, option, script, style')) continue;
+        range.selectNodeContents(t);
+        const b = range.getBoundingClientRect();
+        if (b.width < 2) continue;
+        if (over(b)) { floating = words.slice(0, 40); break; }
+        const above = b.bottom <= r.top + 2 && r.top - b.bottom <= 28 && b.left < r.right && b.right > r.left - 4 && b.left >= r.left - 12;
+        const left = b.right <= r.left + 2 && r.left - b.right <= 160 && b.top < r.bottom && b.bottom > r.top;
+        if (above || left) { beside = true; break; }
+      }
+    }
+    out.push({ i, hint, kind: el.tagName === 'TEXTAREA' ? 'text area' : el.type || 'text', beside, floating, search, lone, signIn, empty: !el.value });
+  });
+  return out;
+};
+// After 1 character was typed into the field: is anything still naming it? Words above the typed
+// text inside the box, or right above the box, that are not the typed text itself.
+const LABEL_WHILE_TYPING = (i) => {
+  const el = document.querySelector(`[data-srf="${i}"]`);
+  if (!el) return null;
+  const vis = x => { const r = x.getBoundingClientRect(); const s = getComputedStyle(x); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const seen = x => { for (let y = x; y && y !== document.documentElement; y = y.parentElement) if (Number(getComputedStyle(y).opacity) < 0.3) return false; return true; };
+  const r = el.getBoundingClientRect();
+  const scope = el.closest('form, fieldset, section, main, [class*=field i], [class*=form i]') || document.body;
+  const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+    const words = t.textContent.replace(/\s+/g, ' ').trim();
+    const p = t.parentElement;
+    if (words.length < 2 || !p || !vis(p) || !seen(p) || p.closest('button, [role=button], a, option, script, style, [role=alert], [class*=error i], [class*=hint i], [class*=help i]')) continue;
+    range.selectNodeContents(t);
+    const b = range.getBoundingClientRect();
+    if (b.width < 2 || b.height < 4) continue;
+    // In the upper part of the box or just above it, and lined up with it.
+    if (b.left < r.right && b.right > r.left && b.left >= r.left - 12 && b.bottom > r.top - 28 && b.top < r.top + r.height * 0.6) return words.slice(0, 40);
+  }
+  return null;
+};
+const fieldRows = [];
+async function labelPass(url, width) {
+  const fields = await page.evaluate(FIND_FIELDS).catch(() => []);
+  const unlabeled = [];
+  for (const f of fields) {
+    f.hint = f.hint || f.floating || '';
+    const row = { page: local(url), field: f.hint || f.kind, kind: f.kind, label: null, typed: false };
+    fieldRows.push(row);
+    if (f.beside) { row.label = 'a label next to the field'; continue; }
+    if (f.search || f.lone) { row.label = f.search ? 'a search box: a hint is enough' : 'a lone box named by its button'; continue; }
+    // Type 1 character and look. On a live app only into sign-in fields that are empty (search
+    // fields were handled above), and Enter is never pressed.
+    const mayType = f.empty && f.kind !== 'date' && f.kind !== 'time' && f.kind !== 'number' && (!remote || f.signIn);
+    if (mayType) {
+      const sel = `[data-srf="${f.i}"]`;
+      const ok = await page.focus(sel, { timeout: 2000 }).then(() => true).catch(() => false);
+      if (ok) {
+        await page.keyboard.type('a').catch(() => {});
+        await page.waitForTimeout(350);
+        const still = await page.evaluate(LABEL_WHILE_TYPING, f.i).catch(() => null);
+        await page.keyboard.press('Backspace').catch(() => {});
+        await page.evaluate(s2 => { const el = document.querySelector(s2); if (el) { if (el.value) el.value = ''; el.blur(); } }, sel).catch(() => {});
+        await page.waitForTimeout(150);
+        row.typed = true;
+        if (still) { row.label = `a floating label: "${still}" stays in view while typing`; continue; }
+        row.label = null;
+        unlabeled.push({ ...f, why: f.floating ? `"${f.floating}" goes away once something is typed` : 'only a hint inside the box, which goes away once something is typed' });
+        continue;
+      }
+    }
+    // Not typed into: text lying over the box is taken as a floating label, and said so.
+    if (f.floating) { row.label = `text over the box ("${f.floating}"), taken as a floating label: not checked by typing`; continue; }
+    unlabeled.push({ ...f, why: 'only a hint inside the box, which goes away once something is typed' });
+  }
+  if (!unlabeled.length) return;
+  const names = unlabeled.map(f => `"${f.hint || f.kind}"`);
+  const shot = `E${String(++shotN).padStart(3, '0')}-unlabeled-field.png`;
+  const ok = await page.locator(`[data-srf="${unlabeled[0].i}"]`).first().evaluate(el => (el.closest('form') || el.parentElement).scrollIntoView({ block: 'center' })).then(() => page.screenshot({ path: join(outDir, shot) })).then(() => true).catch(() => false);
+  lead('unlabeled-field', `${unlabeled.length === 1 ? 'A field has' : `${unlabeled.length} fields have`} no visible label: ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''}. ${unlabeled[0].why.charAt(0).toUpperCase() + unlabeled[0].why.slice(1)}`, url, width, ok ? shot : null,
+    { group: 'unlabeled-field', detail: { count: unlabeled.length, fields: unlabeled.slice(0, 8).map(f => ({ field: f.hint || f.kind, kind: f.kind, why: f.why })) } });
+}
 const markControls = () => page.evaluate(sel => { document.querySelectorAll(sel).forEach((el, i) => { el.dataset.sre = String(i); }); }, CONTROLS).catch(() => {});
 
 try {
@@ -875,13 +1004,25 @@ try {
           // Hover icon-only controls: what does a user learn before clicking? A phone has no hover, so
           // there only the name for screen readers is checked.
           if (c.iconOnly && !phone) {
+            // Before the hover: how wide is the rail or bar this icon sits in?
+            const railBefore = await page.evaluate(s => { const el = document.querySelector(s); const rail = el && el.closest('nav, aside, [role=navigation], [class*=rail i], [class*=sidebar i], [class*=sidenav i]'); return rail ? Math.round(rail.getBoundingClientRect().width) : null; }, sel).catch(() => null);
             await page.hover(sel, { timeout: 2000 }).catch(() => null);
             await page.waitForTimeout(700);
-            row.tooltip = await page.evaluate(s => {
+            row.tooltip = await page.evaluate(([s, was]) => {
               const el = document.querySelector(s); if (!el) return null;
               const tip = [...document.querySelectorAll('[role=tooltip], [data-tooltip], .tooltip, [class*=tooltip i]')].find(t => { const r = t.getBoundingClientRect(); return r.width > 0 && r.height > 0 && (t.innerText || '').trim(); });
-              return tip ? tip.innerText.trim().slice(0, 60) : (el.getAttribute('title') || null);
-            }, sel).catch(() => null);
+              if (tip) return tip.innerText.trim().slice(0, 60);
+              if (el.getAttribute('title')) return el.getAttribute('title');
+              // A rail that opens on hover: the icon now shows its words, or the rail grew and shows them beside it.
+              const vis = x => { const r = x.getBoundingClientRect(); const st = getComputedStyle(x); return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none' && Number(st.opacity) > 0.3; };
+              const words = (el.innerText || '').replace(/\s+/g, ' ').trim();
+              const own = [...el.querySelectorAll('*')].find(x => vis(x) && /[\p{L}]{2,}/u.test([...x.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('')));
+              if (/[\p{L}]{2,}/u.test(words) && own) return `label shown on hover: "${words.slice(0, 40)}"`;
+              const rail = el.closest('nav, aside, [role=navigation], [class*=rail i], [class*=sidebar i], [class*=sidenav i]');
+              const name = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+              if (rail && was !== null && rail.getBoundingClientRect().width - was >= 40 && name && [...rail.querySelectorAll('*')].some(x => !el.contains(x) && vis(x) && (x.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase() === name)) return `label shown on hover: the rail opens and shows "${name}"`;
+              return null;
+            }, [sel, railBefore]).catch(() => null);
             await page.mouse.move(0, 0).catch(() => {});
             if (!row.tooltip) lead('no-tooltip', `Icon-only control "${c.name}" shows no tooltip on hover${c.hasName ? '' : ' and has no name for screen readers'}`, url, width);
           } else if (c.iconOnly && !c.hasName) lead('no-name', `An icon-only control has no name for screen readers`, url, width);
@@ -966,6 +1107,8 @@ try {
         const ok = await page.locator(`[data-srmark="${m.family}"]`).first().screenshot({ path: join(outDir, shot), timeout: 4000 }).then(() => true).catch(() => page.screenshot({ path: join(outDir, shot) }).then(() => true).catch(() => false));
         lead('marker-no-filter', `You can ${m.verb} items but not see only ${m.done} items. ${m.items} items on this screen carry a "${m.control}" control, and no filter, tab, chip or sort option on it uses that word`, url, width, ok ? shot : null, { group: `marker|${m.family}`, detail: { marker: m.control, items: m.items, family: m.family } });
       }
+      // Fields with no visible label. A floating label counts as one: typed into to find out.
+      if (firstWidth) await labelPass(url, width);
       // With the owner's yes: the switches that sit on the page itself.
       if (USE && firstWidth) await flipToggles({ url, width, routeId, opener: null, reopen: null });
       // With the owner's yes, or when not signed in: pick each option of the theme switchers, view
@@ -1060,7 +1203,7 @@ const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
 const notClicked = unique.filter(r => /^not clicked/.test(r.result || ''));
 const totals = { controls: unique.length, clicked: unique.filter(wasClicked).length, opened_something: openedCount, did_nothing: unique.filter(r => r.result === 'nothing visible happened').length, not_clicked: notClicked.length, caused_errors: unique.filter(r => r.errors.length).length };
-writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, options: optionRows, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
+writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, options: optionRows, fields: fieldRows, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
 const md = ['# Explore: every safe control', '',
   `${totals.controls} control(s) at ${widths.join(' and ')} wide: ${totals.opened_something} opened something, ${totals.did_nothing} did nothing visible, ${totals.not_clicked} not clicked, ${totals.caused_errors} caused errors.`, '',
   `For the pain map header: **Controls opened: ${totals.clicked} of ${totals.controls}**`, '',

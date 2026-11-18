@@ -155,6 +155,39 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     ok('duplicate-on-screen: two buttons that open different menus give none, and row menus are not duplicates',
       !differ.json.leads.some(l => l.kind === 'duplicate-on-screen') && opened === 5, `${say(differ.json.leads)}; ${opened} menus opened`);
   }
+
+  // Step 8. Three false alarms to stop.
+  // (a) Floating labels are labels: a sign-in form whose labels move above the field and stay in view
+  //     while typing gives no unlabeled-field lead. Real missing labels are still found: labels that go
+  //     away once something is typed, and fields with only a hint inside the box. On a live app only
+  //     sign-in fields are typed into, 1 character, and nothing is ever submitted.
+  // (b) A rail that opens on hover counts as labeled: no no-tooltip leads. The same rail without the
+  //     hover still gives them.
+  if (want('alarms') && hasPw) {
+    const run = async page => {
+      const app = await serveFixture(`tests/fixtures/labels-app/${page}.html`);
+      const o = tmp('v09-labels');
+      const r = await runNode([S + 'explore.mjs', app.url, '--widths', '1280', '--out', o]);
+      app.stop();
+      const j = readJson(join(o, 'explore.json'), { leads: [{ kind: 'did not run', what: r.err.slice(0, 200), widths: [] }], fields: [] });
+      return { hits: app.hits, fields: j.fields || [], leads: j.leads.filter(l => /^unlabeled-field|did not run/.test(l.kind)) };
+    };
+    const floating = await run('index'), vanishing = await run('vanishing'), hint = await run('placeholder'), profile = await run('profile');
+    ok('floating labels are labels: a sign-in form with floating labels gives no unlabeled-field lead',
+      floating.leads.length === 0 && floating.fields.length === 2 && floating.fields.every(f => f.typed && /^a floating label: .* stays in view while typing$/.test(f.label || '')), `${say(floating.leads)}; ${floating.fields.map(f => f.label).join(' | ')}`);
+    ok('real missing labels are still found: a label that goes away while typing, and fields with only a hint in the box',
+      vanishing.leads.length === 1 && /2 fields have no visible label: "Email address", "Password"\. "Email address" goes away once something is typed/.test(vanishing.leads[0].what)
+      && hint.leads.length === 1 && /Only a hint inside the box/.test(hint.leads[0].what), `${say(vanishing.leads)} / ${say(hint.leads)}`);
+    const typedOnly = h => h.every(x => /^typed=(email|password):[01]$/.test(x));
+    ok('on a live app only sign-in fields are typed into, 1 character at most, and nothing is submitted',
+      floating.hits.length > 0 && [floating, vanishing, hint].every(x => typedOnly(x.hits)) && profile.hits.length === 0 && profile.leads.length === 1 && profile.fields.every(f => !f.typed),
+      `sign-in: ${floating.hits.join(' ')}; profile form: ${profile.hits.length} call(s), ${say(profile.leads)}`);
+    const rail = explore('tests/fixtures/rail-app/index.html', ['--widths', '1280']), bare = explore('tests/fixtures/rail-app/bare.html', ['--widths', '1280']);
+    const tips = j => j.leads.filter(l => l.kind === 'no-tooltip');
+    ok('a rail that opens on hover counts as labeled: no no-tooltip leads',
+      tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 3 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')), say(rail.json.leads));
+    ok('the same rail with no labels on hover still gives 3 no-tooltip leads', tips(bare.json).length === 3, say(tips(bare.json)));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
