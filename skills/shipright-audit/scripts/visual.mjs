@@ -5,6 +5,7 @@
 // Since 0.8 also: template text left in view ("[topic]", "{name}", "undefined"), icons too faint to see
 // (under 3:1), a chip or button that sticks out of its card, the same text or control twice on one
 // screen, and two stacked rows of controls that could be one row.
+// Since 0.9 also: inputs, dropdowns and outline buttons whose border is too faint to see (under 3:1).
 // Every finding gets a cropped screenshot when there is something to crop.
 // Usage: node <skill>/scripts/visual.mjs <index.html|url> --audit <audit> [--routes "#/,#/library"]
 //        [--widths 1280,390] [--no-click]
@@ -176,7 +177,7 @@ for (const p of pages) for (const it of p.item_states || []) {
 }
 const itemStates = [...stateMap.values()].map(x => ({ item: x.item, states: [...x.states].sort(), pages: [...x.pages] }));
 writeFileSync(join(outDir, 'visual.json'), JSON.stringify({ target, widths, signed_in_with: opened.mode !== 'none' ? opened.label : null, item_states: itemStates, pages: pages.map(p => ({ ...p, url: local(p.url) })), leads, findings: findings.map(({ group, ...f }) => ({ ...f, page: local(f.page) })) }, null, 2) + '\n');
-const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one' };
+const KIND = { 'sentence-pill': 'Sentence used as a pill', 'crowded-pills': 'Too many pills', misaligned: 'Misaligned in repeated cards', 'big-gap': 'Big empty gap in a card', 'covered-menu': 'Menu covered by another layer', 'offscreen-menu': 'Menu runs off screen', 'sharp-corners': 'Corner shape drift', 'count-mismatch': 'Count with nothing behind it', 'buried-action': 'Main action buried at the bottom', 'label-overload': 'Too many labels on a card', 'clipped-text': 'Text cut off', 'media-not-loaded': 'Media that never loaded', 'layout-shift': 'Page jumps while loading', 'reduced-motion': 'Moves with "reduce motion" on', 'template-text': 'Template text showing', 'faint-icon': 'Icons too faint to see', 'overflow-box': 'Sticks out of its box', 'duplicate-on-screen': 'Shown twice on one screen', 'stacked-controls': 'Two control rows that could be one', 'faint-border': 'Component outline too faint to see' };
 const md = ['# Visual checks', '', `${pages.length} page(s) at ${widths.join(' and ')} wide${opened.mode !== 'none' ? `, signed in with ${opened.label}` : ''}, ${leads.length} lead(s).`, '',
   'Every lead below must appear in the pain map\'s **Script leads** table: as a pain (P##), or as Rejected with the reason you saw on the crop. The gate checks this.', ''];
 const unsettledPages = pages.filter(p => p.settled === false).map(p => local(p.url));

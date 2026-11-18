@@ -75,6 +75,19 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     ok('tabs: sub-pages of one section are compared too, and one with no page title is a lead',
       subLeads.some(l => l.kind === 'tab-chrome-differs' && /a page title shows on "Profile", "Security" but not on "Plan"/.test(l.what)) && subLeads.filter(l => l.kind === 'tab-chrome-differs').length === 1, say(subLeads));
   }
+
+  // Step 3. Component borders need contrast. A dark page with an input, a dropdown and an outline
+  // button bordered #333533 on #2A2C29: 1 lead that reports the colors. The same input with a
+  // contrasting fill gives none. A light page with ordinary light gray borders gives none either.
+  if (want('border') && hasPw) {
+    const of = page => visual(`tests/fixtures/craft-app/${page}.html`, ['--no-click']);
+    const dark = of('border'), filled = of('border-filled'), light = of('border-light');
+    const leads = dark.json.leads.filter(l => l.kind === 'faint-border');
+    ok('faint-border: an input bordered #333533 on #2A2C29 is 1 lead that reports the colors',
+      leads.length === 1 && /the border of the input "Client name" is #333533 on #2A2C29, 1\.1:1/.test(leads[0].what) && /3 controls \(input, dropdown, button\)/.test(leads[0].what) && leads[0].widths.join() === '1280,390' && !!leads[0].shot && existsSync(join(dark.o, leads[0].shot)), say(leads));
+    ok('faint-border: the same input with a contrasting fill gives none, and light gray borders on white give none',
+      !filled.json.leads.some(l => l.kind === 'faint-border') && !light.json.leads.some(l => l.kind === 'faint-border'), say([...filled.json.leads, ...light.json.leads]));
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

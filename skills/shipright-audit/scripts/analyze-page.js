@@ -27,6 +27,14 @@
 //   duplicate-on-screen  the same text block (40 characters or more) in two sections, or the same
 //                        control in two navigations
 //   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
+// Added in 0.9 (V14 in references/visual-craft.md):
+//   faint-border         an input, dropdown, checkbox, radio button or outline button whose only boundary
+//                        is its border, with under 3:1 between that border and the surface behind it
+//                        (WCAG 1.4.11), and so close to it that the eye cannot find it (a lightness
+//                        contrast under 8 on the APCA scale: a dark gray border on a dark surface. A light
+//                        gray border on white scores 13 or more and is not a lead). Reported with the
+//                        colors: "#3A3C39 on #2A2C29, 1.3:1". A component whose fill contrasts at 3:1 or
+//                        more with the surface needs no visible border.
 // A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
 // It also returns "item_states": the status labels seen on repeated items ("Editing", "Rendering", "Ready").
 // Not a lead: an item type with 3 or more states needs an Item lifecycles table in the pain map (Step 2b).
@@ -636,6 +644,105 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
       const pct = w => Math.round(share(w) * 100);
       const rects = [...high.els, ...low.els].map(x => x.r);
       add({ kind: 'stacked-controls', group: 'stacked-controls', what: `Two rows of controls sit above the same list (${names(high)} / ${names(low)}), and each uses less than half the width (${pct(high)}% and ${pct(low)}%). Could these be one row?`, detail: { rows: [{ controls: names(high), width_share: pct(high) }, { controls: names(low), width_share: pct(low) }], list_width: Math.round(L.width) }, crop: pageBox([...rects, { left: L.left, right: L.right, top: Math.min(...rects.map(r => r.top)), bottom: L.top + 60 }], 8) }, found.list);
+    }
+  }
+
+  // ---- Faint borders: a component whose outline cannot be seen (WCAG 1.4.11) ------------------------
+  // Inputs, text areas, dropdowns, dropdown triggers, checkboxes, radio buttons and outline buttons.
+  // When the fill is close to the surface behind it, the border is the only thing that shows where the
+  // component is, so the border needs 3:1 against that surface. The WCAG ratio alone would flag the
+  // light gray borders that most light themes use (1.3:1 to 1.9:1 on white), which people do see. So a
+  // lead also needs the border to be lost to the eye: a perceived lightness contrast under 8 (APCA Lc,
+  // which rates dark pairs far lower than the WCAG ratio does). "#3A3C39 on #2A2C29" scores 5.5 and is
+  // a lead. "#DDE1E8 on #FFFFFF" scores 18 and is not. Skipped: a component whose fill
+  // contrasts at 3:1 or more (it needs no border), a filled button (its fill and its words show where it
+  // is), disabled controls, native checkboxes and radio buttons (the browser draws them), and anything
+  // over a picture or a gradient, which cannot be measured.
+  {
+    const MIN = 3, LOST = 8;
+    // Perceived lightness contrast (APCA 0.0.98G), 0 to about 106. The sign (dark on light, or light on dark) is dropped.
+    const apca = (fg, bg) => {
+      const y = c => { const v = 0.2126729 * Math.pow(c.r / 255, 2.4) + 0.7151522 * Math.pow(c.g / 255, 2.4) + 0.072175 * Math.pow(c.b / 255, 2.4); return v > 0.022 ? v : v + Math.pow(0.022 - v, 1.414); };
+      const t = y(fg), b = y(bg);
+      return Math.abs(b > t ? (Math.pow(b, 0.56) - Math.pow(t, 0.57)) * 114 : (Math.pow(b, 0.65) - Math.pow(t, 0.62)) * 114);
+    };
+    const FIELD = 'input:not([type=hidden]):not([type=range]):not([type=file]):not([type=color]):not([type=image]):not([type=submit]):not([type=button]):not([type=reset]), textarea, select, [role=combobox], [role=textbox], [role=searchbox], [role=checkbox], [role=radio]';
+    const TRIGGER = 'button[aria-haspopup], [role=button][aria-haspopup]';
+    const BUTTON = 'button, [role=button], a[class*=btn i], a[class*=button i], input[type=submit], input[type=button]';
+    const HEX = c => hex(c).toUpperCase();
+    const fadeOf = el => { let o = 1; for (let x = el; x && x !== document.documentElement; x = x.parentElement) o *= Number(getComputedStyle(x).opacity); return o; };
+    // The colors that draw an element's edge: its border sides, or a ring made with a box shadow
+    // (no blur, spread of 1px or more). null: it has no edge. false: it has one that cannot be measured.
+    const edges = el => {
+      const cs = getComputedStyle(el), out = [];
+      for (const sd of ['Top', 'Right', 'Bottom', 'Left']) {
+        if (!(parseFloat(cs[`border${sd}Width`]) > 0) || ['none', 'hidden'].includes(cs[`border${sd}Style`])) continue;
+        const c = rgba(cs[`border${sd}Color`]);
+        if (!c) return false;
+        if (c.a > 0.02) out.push(c);
+      }
+      if (cs.boxShadow && cs.boxShadow !== 'none') {
+        for (const part of cs.boxShadow.split(/,(?![^(]*\))/)) {
+          const m = part.trim().match(/^(.+?)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?(\s+inset)?$/i);
+          if (!m || parseFloat(m[4]) > 1 || parseFloat(m[5] || 0) < 1 || Math.abs(parseFloat(m[2])) >= 1 || Math.abs(parseFloat(m[3])) >= 1) continue;
+          const c = rgba(m[1]);
+          if (c && c.a > 0.02) out.push(c);
+        }
+      }
+      return out.length ? out : null;
+    };
+    // What a person sees of one box: its fill over the surface, and its strongest edge against that surface.
+    const look = el => {
+      const cs = getComputedStyle(el);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return null;
+      const surface = backdrop(el), fill = rgba(cs.backgroundColor);
+      if (!surface || !fill) return null;
+      const fade = fadeOf(el);
+      const fillSeen = fill.a > 0.01 ? over({ ...fill, a: Math.min(1, fill.a * fade) }, surface) : surface;
+      const e = edges(el);
+      if (e === false) return null;
+      const seen = (e || []).map(c => over({ ...c, a: Math.min(1, c.a * fade) }, fillSeen)).sort((a, b) => contrast(b, surface) - contrast(a, surface))[0] || null;
+      return { surface, fill: contrast(fillSeen, surface), edge: seen, ratio: seen ? contrast(seen, surface) : null, lc: seen ? apca(seen, surface) : null };
+    };
+    const nameOf = el => {
+      const lab = (el.labels && el.labels[0]) || el.closest('label');
+      return (el.getAttribute('aria-label') || el.getAttribute('placeholder') || (lab && (ownText(lab) || text(lab))) || (el.matches(BUTTON) && (text(el) || el.value)) || el.getAttribute('title') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    };
+    const faint = [], judged = new Set();
+    const judge = (el, word, outlineOnly) => {
+      if (judged.has(el) || !inScope(el) || !shown(el)) return;
+      judged.add(el);
+      if (el.disabled || el.readOnly || el.getAttribute('aria-disabled') === 'true' || el.closest('[aria-disabled="true"], fieldset[disabled], [aria-hidden="true"]')) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 12 || r.height < 12 || r.height > 400) return;
+      if (el.matches('input[type=checkbox], input[type=radio]') && getComputedStyle(el).appearance !== 'none') return;
+      let box = el, l = look(el);
+      if (!l) return;
+      // A field with no border of its own is often drawn by its wrapper (an icon and an input inside
+      // one rounded box). Judge the nearest wrapper that hugs it and has an edge or a fill.
+      if (!l.edge && !outlineOnly) {
+        for (let x = el.parentElement, i = 0; x && i < 3 && x !== document.body; x = x.parentElement, i++) {
+          const w = x.getBoundingClientRect();
+          if (w.width > r.width + 140 || w.height > r.height + 48) break;
+          const lw = look(x);
+          if (!lw) return;
+          if (lw.edge || lw.fill >= 1.1) { box = x; l = lw; break; }
+        }
+      }
+      if (!l.edge || l.fill >= MIN || l.ratio >= MIN || l.lc >= LOST) return;
+      if (outlineOnly && l.fill >= 1.1) return; // a filled button, not an outline button
+      faint.push({ el: box, word, name: nameOf(el), ratio: Math.round(l.ratio * 10) / 10, lc: Math.round(l.lc * 10) / 10, border: HEX(l.edge), surface: HEX(l.surface) });
+    };
+    for (const el of document.querySelectorAll(FIELD)) judge(el, el.matches('select, [role=combobox]') ? 'dropdown' : el.matches('[type=checkbox], [role=checkbox]') ? 'checkbox' : el.matches('[type=radio], [role=radio]') ? 'radio button' : 'input', false);
+    for (const el of document.querySelectorAll(TRIGGER)) judge(el, 'dropdown', false);
+    for (const el of document.querySelectorAll(BUTTON)) judge(el, 'button', true);
+    if (faint.length) {
+      faint.sort((a, b) => a.ratio - b.ratio);
+      const f = faint[0];
+      const kinds = [...new Set(faint.map(x => x.word))];
+      const others = faint.slice(1, 4).map(x => `${x.word}${x.name ? ` "${x.name}"` : ''} ${x.border} on ${x.surface}, ${x.ratio.toFixed(1)}:1`);
+      add({ kind: 'faint-border', group: 'faint-border', what: `${faint.length === 1 ? `The outline of ${/^[aeiou]/.test(f.word) ? 'an' : 'a'} ${f.word} is` : `The outlines of ${faint.length} controls (${kinds.join(', ')}) are`} hard to see: the border of the ${f.word}${f.name ? ` "${f.name}"` : ''} is ${f.border} on ${f.surface}, ${f.ratio.toFixed(1)}:1 (component borders need 3:1)${others.length ? `. Also: ${others.join('; ')}` : ''}`,
+        detail: { count: faint.length, lowest: f.ratio, items: faint.slice(0, 10).map(x => ({ kind: x.word, name: x.name, border: x.border, background: x.surface, contrast: x.ratio, lightness_contrast: x.lc })) }, crop: pageBox([f.el.getBoundingClientRect()], 24) }, f.el);
     }
   }
 
