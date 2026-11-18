@@ -269,7 +269,7 @@ export function check(md, dir = null) {
     for (const f of findAll(dir, 'walk.json')) {
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || []).map(l => l.id)); scriptActions += (v.used_actions || []).length; } catch {}
     }
-    try { const ex = find(dir, 'explore.json'); if (ex) scriptActions += JSON.parse(readFileSync(ex, 'utf8')).use?.switches_flipped || 0; } catch {}
+    try { const ex = find(dir, 'explore.json'); if (ex) { const use = JSON.parse(readFileSync(ex, 'utf8')).use || {}; scriptActions += (use.switches_flipped || 0) + (use.option_picks || 0); } } catch {}
     // The owner's limits: when use-limits.json holds anything back, the header says so in the owner's words.
     const limitsFile = find(dir, 'use-limits.json');
     if (limitsFile) {

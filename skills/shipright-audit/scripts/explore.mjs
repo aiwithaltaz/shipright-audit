@@ -37,6 +37,16 @@
 //   - "tab-shift": the content start moves by more than 4px between tabs.
 //   - "tab-chrome-differs": a back control or a page title shows on some tabs and not on others. When
 //     a sidebar or rail is in view the lead says so: a back arrow is not needed next to a sidebar.
+// And that options do not vanish after use (new in 0.9). Only with --use (the owner said yes), or when
+// the run is not signed in, where nothing is saved to an account:
+//   - For a control that shows a short list of options or cycles through them (a theme switcher, a
+//     view toggle, a segmented control) it records the options shown, picks each one in turn, and
+//     records the options shown after each pick. An option seen before that can no longer be picked
+//     is an "option-vanished" lead. Then it puts the control back to its first state, and says so
+//     when it could not.
+//   - Never picked: options with risky or account-wide words (plans, billing, roles, sharing, a
+//     language or a model), anything the owner's limits hold, and, on settings and account screens,
+//     anything that is not about the look of the app (theme, density, view).
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first. If the app no longer
 // knows us it stops with exit 3 and never explores signed out by accident.
 // For each control it records: its name, whether it is icon-only, the tooltip shown on hover, what opened
@@ -85,6 +95,9 @@ const USE = args.includes('--use');
 // What the owner ruled out when they said yes with limits. Only read with --use.
 const limits = USE ? ownerLimits : null;
 const MAX_FLIPS = 12; // per page
+// Picking options (theme, view, segmented controls) needs the owner's yes too, except when the run is
+// not signed in: there nothing is saved to an account. Set after the browser opens.
+let PICK = USE;
 const OPENER = /\b(open|menu|more|options|settings|preferences|filter|sort|view|show|details|info|help|select|choose|picker|model|attach|tools|add|new|create|expand|collapse|sidebar|panel|search|budget|usage|context|account|profile|switch|tab|history|notifications?|microphone|voice|dictat\w*|speech|help)\b/i;
 const CONTROLS = 'button, [role=button], [role=tab], summary, [aria-haspopup]:not(a)';
 // Layers a control can open. Text checks after a click look only inside these.
@@ -157,6 +170,7 @@ const site = await openTarget(target, 'explore');
 const remote = site.remote;
 const ctx = await openContext({ session, profile, name: 'explore', url: landedOn(landed, site.startUrl) || site.startUrl, viewport: viewportFor(widths[0]) });
 const page = ctx.page;
+if (ctx.mode === 'none') PICK = true;
 let errs = [];
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
 page.on('pageerror', e => errs.push(e.message.slice(0, 200)));
@@ -195,7 +209,11 @@ const FIND_TOGGLES = ([sel, layers, inLayer]) => {
     // A checkbox on each row of a list (tick a task, pick a row) is the user's data, not a setting.
     const row = within ? null : el.closest('li, tr, [role=row], [role=listitem], [role=option]');
     const perItem = !!row && !!row.parentElement && [...row.parentElement.children].filter(r => r.querySelector(sel) || r.matches(sel)).length >= 3;
-    out.push({ i, name: name || '(no name)', state: state(el), place: place.slice(0, 60), clickLabel: !vis(el), perItem });
+    // One of a row of buttons where exactly one is pressed (a segmented control): an option, not a
+    // switch. Clicking it again does not turn it off. The option check picks and restores those.
+    const sibs = el.hasAttribute('aria-pressed') && el.parentElement ? [...el.parentElement.children].filter(vis) : [];
+    const option = sibs.length >= 2 && sibs.length <= 6 && sibs.every(k => k.hasAttribute('aria-pressed')) && sibs.filter(k => k.getAttribute('aria-pressed') === 'true').length === 1;
+    out.push({ i, name: name || '(no name)', state: state(el), place: place.slice(0, 60), clickLabel: !vis(el), perItem, option });
   });
   return out;
 };
@@ -237,6 +255,7 @@ async function flipToggles({ url, width, routeId, opener, reopen }) {
     toggles.push(row);
     const ruledOut = heldBy(limits, t.name);
     if (ruledOut) { row.skipped = `held: the owner ruled this out ("${ruledOut.action}")`; row.held_by = ruledOut.action; }
+    else if (t.option) row.skipped = 'one option of a segmented control, not a switch: see Option controls';
     else if (DANGER.test(t.name)) row.skipped = 'risky word';
     else if (ACCOUNT_NAME.test(t.name)) row.skipped = 'an account-wide setting: needs its own yes';
     else if (t.perItem || ITEM_ACTION.test(t.name)) row.skipped = 'changes one of the user\'s items, not a setting: needs its own yes';
@@ -552,6 +571,206 @@ async function tabPass(width) {
     }
   }
 }
+// ---- Options must not vanish after use ---------------------------------------------------------
+// Words that make an option control unsafe to pick, even with a yes.
+const OPTION_RISK = /\b(plan|plans|billing|upgrade|premium|enterprise|pro|team|role|permission|owner|admin|member|currency|language|locale|region|country|time ?zone|model|workspace|organi[sz]ation|account)\b/i;
+// A control about the look of the app, by its name or by what it offers.
+const LOOK_NAME = /\b(theme|appearance|dark mode|light mode|night mode|colou?r (scheme|mode))\b/i;
+// A button that opens a list may also be named for the view it changes ("View", "Layout", "Density").
+const LOOK_MENU = /^(view|layout|display|density)( mode| options?| settings)?$/i;
+const LOOK_OPTION = /^(system|auto|automatic|device|os default|use system setting|system default|match system|light|dark|dim|default|grid|list|table|board|cards?|gallery|kanban|compact|comfortable|cozy|spacious|dense|day|week|month|year)( mode| theme| view)?$/i;
+// The option controls on this page, with the options each one shows right now.
+//   group: a radio group, or a row of 2 to 6 buttons where one is pressed (a segmented control)
+//   button: one button named like a theme or view switcher. Clicking shows whether it cycles or opens a list.
+const FIND_OPTIONS = ([lookName, lookMenu]) => {
+  const LOOK = new RegExp(lookName, 'i'), MENU = new RegExp(lookMenu, 'i');
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const nameOf = el => (text(el) || el.getAttribute('aria-label') || el.getAttribute('title') || '').slice(0, 40);
+  const on = el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-pressed') === 'true' || el.getAttribute('aria-selected') === 'true' || /^(on|checked|active)$/.test(el.dataset.state || '');
+  const mark = el => { if (!el.dataset.sro) { window.__srOptN = (window.__srOptN || 0) + 1; el.dataset.sro = 'o' + window.__srOptN; } return el.dataset.sro; };
+  const labelOf = box => {
+    const by = (box.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(text).join(' ');
+    const near = box.previousElementSibling && /^(LABEL|LEGEND|H[1-6]|SPAN|P|DT)$/.test(box.previousElementSibling.tagName) ? text(box.previousElementSibling) : '';
+    const legend = box.closest('fieldset') && box.closest('fieldset').querySelector('legend') ? text(box.closest('fieldset').querySelector('legend')) : '';
+    return (box.getAttribute('aria-label') || by || legend || (near.length <= 40 ? near : '')).slice(0, 40);
+  };
+  document.querySelectorAll('[data-sropt]').forEach(el => { delete el.dataset.sropt; });
+  const out = [], taken = new Set();
+  const group = (box, items) => {
+    items = items.filter(vis);
+    if (items.length < 2 || items.length > 6 || box.closest('[role=dialog], dialog, [role=menu], [role=tablist], form[action]')) return;
+    if (items.some(i => i.disabled || i.getAttribute('aria-disabled') === 'true' || !nameOf(i))) return;
+    const m = mark(box);
+    items.forEach((el, i) => { el.dataset.sropt = `${m}:${i}`; taken.add(el); });
+    const act = items.find(on);
+    const sec = box.closest('section, article, aside, main, [class*=settings i], [class*=preferences i]');
+    out.push({ mark: m, form: 'group', name: labelOf(box), options: items.map(nameOf), active: act ? nameOf(act) : null, place: sec ? text(sec.querySelector('h1, h2, h3, [role=heading]') || { innerText: '' }).slice(0, 60) : '' });
+  };
+  document.querySelectorAll('[role=radiogroup]').forEach(box => { if (vis(box)) group(box, [...box.querySelectorAll('[role=radio]')]); });
+  const parents = new Set([...document.querySelectorAll('button[aria-pressed], [role=button][aria-pressed]')].filter(b => vis(b) && !taken.has(b)).map(b => b.parentElement));
+  for (const box of parents) {
+    const kids = [...box.children].filter(vis);
+    const pressed = kids.filter(k => k.hasAttribute('aria-pressed'));
+    // A segmented control: every button in the row can be pressed, and exactly one is.
+    // (A row this check already marked stays one, even when a pick left nothing pressed.)
+    if (pressed.length === kids.length && (pressed.filter(on).length === 1 || box.dataset.sro)) group(box, pressed);
+  }
+  for (const el of document.querySelectorAll('button, [role=button]')) {
+    if (!vis(el) || taken.has(el) || el.disabled || el.hasAttribute('aria-pressed') || el.closest('[role=dialog], dialog, [role=menu], [role=radiogroup]')) continue;
+    const said = (el.getAttribute('aria-label') || el.getAttribute('title') || text(el) || '').slice(0, 40);
+    const pops = (el.hasAttribute('aria-haspopup') && el.getAttribute('aria-haspopup') !== 'false') || el.hasAttribute('aria-expanded');
+    if (!said || !(LOOK.test(said) || (pops && MENU.test(said)))) continue;
+    out.push({ mark: mark(el), form: 'button', name: said, options: [], active: null, place: '', pops });
+  }
+  return out;
+};
+// What a look switcher is set to right now: its own name, and the theme the page carries.
+const LOOK_STATE = (m) => {
+  const el = document.querySelector(`[data-sro="${m}"]`);
+  const text = x => (x.innerText || x.textContent || '').replace(/\s+/g, ' ').trim();
+  const html = document.documentElement;
+  const theme = [html.dataset.theme, html.dataset.mode, html.dataset.colorScheme, [...html.classList].filter(c => /^(light|dark|system|auto|dim)$/i.test(c)).join(' '), document.body && document.body.dataset.theme, html.style.colorScheme].filter(Boolean).join(' ');
+  const name = el ? ((el.getAttribute('aria-label') || el.getAttribute('title') || text(el) || '').slice(0, 40)) : null;
+  const icon = el ? ((el.querySelector('svg, i, use, [data-icon]') || { getAttribute: () => '' }).getAttribute('class') || '') + ((el.querySelector('use') || { getAttribute: () => '' }).getAttribute('href') || '') + (el.dataset.icon || '') : '';
+  return { name, theme, key: `${name}|${theme}|${icon}` };
+};
+// The items of the menu or list that is open right now.
+const OPEN_ITEMS = (layers) => {
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  document.querySelectorAll('[data-sritem]').forEach(el => { delete el.dataset.sritem; });
+  const layer = [...document.querySelectorAll(layers)].filter(vis).pop();
+  if (!layer) return null;
+  const items = [...layer.querySelectorAll('[role=menuitemradio], [role=menuitem], [role=option], [role=radio]')].filter(vis);
+  items.forEach((el, i) => { el.dataset.sritem = String(i); });
+  const on = el => el.getAttribute('aria-checked') === 'true' || el.getAttribute('aria-selected') === 'true' || /^(on|checked|active)$/.test(el.dataset.state || '');
+  const act = items.find(on);
+  return { options: items.map(el => (text(el) || el.getAttribute('aria-label') || '').slice(0, 40)), active: act ? text(act).slice(0, 40) : null, links: items.some(el => el.matches('a[href]') || el.querySelector('a[href]')) };
+};
+const optionRows = [];
+const seenOptions = new Set();
+async function optionPass(url, width) {
+  const where = new URL(url).pathname + new URL(url).hash;
+  const found = await page.evaluate(FIND_OPTIONS, [LOOK_NAME.source, LOOK_MENU.source]).catch(() => []);
+  const again = async c => (await page.evaluate(FIND_OPTIONS, [LOOK_NAME.source, LOOK_MENU.source]).catch(() => [])).find(x => x.mark === c.mark) || null;
+  const reload = async () => { await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null); await settle(page, { timeout: 6000 }); };
+  for (const c of found) {
+    const key = `${c.form}|${c.name}|${c.options.join(',')}`;
+    if (seenOptions.has(key)) continue;
+    seenOptions.add(key);
+    const label = c.name || c.options.join(' / ');
+    const row = { page: local(url), width, control: label, form: c.form, options_before: c.options, was: c.active, picks: [], vanished: [], ends_on: null, restored: null, skipped: null };
+    optionRows.push(row);
+    const words = `${c.name} ${c.options.join(' ')}`;
+    const look = LOOK_NAME.test(c.name) || LOOK_MENU.test(c.name) || (c.options.length > 0 && c.options.every(o => LOOK_OPTION.test(o)));
+    const ruledOut = heldBy(limits, c.name) || c.options.map(o => heldBy(limits, o)).find(Boolean);
+    if (ruledOut) { row.skipped = `held: the owner ruled this out ("${ruledOut.action}")`; row.held_by = ruledOut.action; }
+    else if (DANGER.test(words) || ACCOUNT_NAME.test(words) || OPTION_RISK.test(words)) row.skipped = 'risky or account-wide words: needs its own yes';
+    else if (!look && (ACCOUNT_PLACE.test(where) || ACCOUNT_PLACE.test(c.place))) row.skipped = 'on a settings or account screen, and not about the look of the app: needs its own yes';
+    else if (optionRows.filter(r => !r.skipped && r.page === row.page).length > 6) row.skipped = 'page limit reached';
+    if (row.skipped) continue;
+    errs = [];
+    let s0 = null;
+    if (c.form === 'group') {
+      // The selected option goes last: picking it again puts the control back as it was.
+      for (const o of [...c.options.filter(x => x !== c.active), ...c.options.filter(x => x === c.active)]) {
+        const now = await again(c);
+        if (!now) { row.note = 'the control went away after a pick'; break; }
+        const i = now.options.indexOf(o);
+        if (i < 0) continue; // already gone: reported below
+        if (!(await page.click(`[data-sropt="${c.mark}:${i}"]`, { timeout: 3000 }).then(() => true).catch(() => false))) continue;
+        await settle(page, { timeout: 3000 });
+        const after = await again(c);
+        if (!after) { row.picks.push({ picked: o, shows: [] }); row.note = 'the control went away after a pick'; break; }
+        const shown = after.options;
+        row.picks.push({ picked: o, shows: shown });
+        for (const gone of c.options.filter(x => !shown.includes(x) && !row.vanished.some(v => v.option === x))) row.vanished.push({ option: gone, after_picking: o, shows: shown });
+      }
+      // Put it back: pick what was selected before.
+      let now = await again(c);
+      if (c.active && now && now.active !== c.active && now.options.includes(c.active)) { await page.click(`[data-sropt="${c.mark}:${now.options.indexOf(c.active)}"]`, { timeout: 3000 }).catch(() => null); await settle(page, { timeout: 3000 }); now = await again(c); }
+      row.ends_on = now ? now.active : null;
+      row.restored = !c.active ? null : (!!now && now.active === c.active);
+    } else {
+      // One button: does it open a list, or step through the options itself?
+      s0 = await page.evaluate(LOOK_STATE, c.mark).catch(() => null);
+      const sel = `[data-sro="${c.mark}"]`;
+      const before = await page.evaluate(STATE).catch(() => ({ open: [] }));
+      if (!s0 || !(await page.click(sel, { timeout: 3000 }).then(() => true).catch(() => false))) { row.skipped = 'could not click (covered or moved)'; continue; }
+      await settle(page, { timeout: 2500 });
+      const opened = (await page.evaluate(STATE).catch(() => ({ open: [] }))).open.filter(o => !before.open.includes(o));
+      if (opened.length) {
+        row.form = 'menu';
+        const first = await page.evaluate(OPEN_ITEMS, LAYERS).catch(() => null);
+        const safe = first && first.options.length >= 2 && first.options.length <= 6 && !first.links && first.options.every(o => o && LOOK_OPTION.test(o));
+        if (!safe) { row.skipped = 'opens a list that is not a short set of look options'; await page.keyboard.press('Escape').catch(() => {}); await page.waitForTimeout(200); continue; }
+        row.options_before = first.options; row.was = first.active;
+        const openMenu = async () => { let it = await page.evaluate(OPEN_ITEMS, LAYERS).catch(() => null); if (!it) { await page.click(sel, { timeout: 3000 }).catch(() => null); await settle(page, { timeout: 2000 }); it = await page.evaluate(OPEN_ITEMS, LAYERS).catch(() => null); } return it; };
+        const pick = async o => { const it = await openMenu(); const i = it ? it.options.indexOf(o) : -1; if (i < 0) return false; const ok = await page.click(`[data-sritem="${i}"]`, { timeout: 3000 }).then(() => true).catch(() => false); await settle(page, { timeout: 2500 }); return ok; };
+        for (const o of first.options) {
+          if (!(await pick(o))) continue;
+          const it = await openMenu();
+          const shown = it ? it.options : [];
+          row.picks.push({ picked: o, shows: shown });
+          for (const gone of first.options.filter(x => !shown.includes(x) && !row.vanished.some(v => v.option === x))) row.vanished.push({ option: gone, after_picking: o, shows: shown });
+        }
+        // Put it back: the option that was checked, or the one that brings the first state back.
+        let back = false;
+        for (const o of (first.active ? [first.active] : first.options)) {
+          if (!(await pick(o))) continue;
+          const s = await page.evaluate(LOOK_STATE, c.mark).catch(() => null);
+          if (first.active || (s && s.key === s0.key)) { back = !!s && (s.key === s0.key || !!first.active); row.ends_on = o; break; }
+        }
+        row.restored = back;
+        await page.keyboard.press('Escape').catch(() => {});
+        await page.waitForTimeout(200);
+      } else {
+        row.form = 'cycle';
+        const states = [s0];
+        let closedAt = -1;
+        let s = await page.evaluate(LOOK_STATE, c.mark).catch(() => null);
+        for (let n = 0; s && n < 7; n++) {
+          const j = states.findIndex(x => x.key === s.key);
+          if (j >= 0) { closedAt = j; break; }
+          states.push(s);
+          row.picks.push({ picked: `click ${n + 1}`, shows: [s.name !== s0.name || !s.theme ? s.name : s.theme] });
+          if (!(await page.click(sel, { timeout: 3000 }).then(() => true).catch(() => false))) break;
+          await settle(page, { timeout: 2500 });
+          s = await page.evaluate(LOOK_STATE, c.mark).catch(() => null);
+        }
+        const names = states.some(x => x.name !== s0.name) || !s0.theme ? states.map(x => x.name) : states.map(x => x.theme);
+        row.options_before = names; row.was = names[0];
+        if (states.length === 1) { row.skipped = 'clicking it changed nothing that could be read'; continue; }
+        if (closedAt > 0) for (const gone of names.slice(0, closedAt)) row.vanished.push({ option: gone, after_picking: 'one click', shows: names.slice(closedAt) });
+        row.ends_on = s ? (names[states.findIndex(x => x.key === s.key)] || s.name) : null;
+        row.restored = closedAt === 0;
+      }
+    }
+    row.errors = [...new Set(errs)].slice(0, 5);
+    // Not back by clicking: does a reload bring the first state back?
+    if (row.restored === false) {
+      await reload();
+      if (c.form === 'group') { const now = (await page.evaluate(FIND_OPTIONS, [LOOK_NAME.source, LOOK_MENU.source]).catch(() => [])).find(x => x.name === c.name && x.form === 'group'); row.back_after_reload = !!now && now.active === c.active; }
+      else {
+        const now = (await page.evaluate(FIND_OPTIONS, [LOOK_NAME.source, LOOK_MENU.source]).catch(() => [])).find(x => x.form === 'button' && x.name === c.name);
+        const s = now ? await page.evaluate(LOOK_STATE, now.mark).catch(() => null) : null;
+        row.back_after_reload = !!s && !!s0 && s.key === s0.key;
+      }
+    }
+    if (row.vanished.length) {
+      const v = row.vanished[0];
+      const shot = `E${String(++shotN).padStart(3, '0')}-option-${label.replace(/[^a-z0-9]+/gi, '-').slice(0, 24)}.png`;
+      const ok = await page.screenshot({ path: join(outDir, shot) }).then(() => true).catch(() => false);
+      const left = row.restored === false ? `. It was on "${row.was}" before this check and ${row.back_after_reload ? 'only a reload put it back' : `could not be put back (it is now on "${row.ends_on || 'another option'}")`}: tell the owner and list it in Left behind` : '';
+      lead('option-vanished', `The "${label}" control loses an option after use: it offered ${row.options_before.join(', ')}. After ${row.form === 'cycle' ? v.after_picking : `picking "${v.after_picking}"`} it only offers ${v.shows.join(', ') || 'nothing'}, so ${row.vanished.map(x => `"${x.option}"`).join(' and ')} can no longer be picked${left}`, url, width, ok ? shot : null,
+        { group: `option|${label}`, detail: { control: label, form: row.form, options: row.options_before, vanished: row.vanished, restored: row.restored, back_after_reload: row.back_after_reload || false } });
+    } else if (row.restored === false) lead('option-not-restored', `The "${label}" control could not be put back to "${row.was}"${row.back_after_reload ? ' by clicking: only a reload put it back' : `: it is now on "${row.ends_on || 'another option'}". Tell the owner and list it in Left behind`}`, url, width, null, { group: `option-left|${label}` });
+    if ((row.errors || []).length) lead('error-on-click', `Picking an option of "${label}" caused ${row.errors.length} error(s): ${row.errors[0]}`, url, width);
+    // After a reload or a menu, mark the page's controls again for whatever runs next.
+    await markControls();
+  }
+}
 const markControls = () => page.evaluate(sel => { document.querySelectorAll(sel).forEach((el, i) => { el.dataset.sre = String(i); }); }, CONTROLS).catch(() => {});
 
 try {
@@ -565,8 +784,8 @@ try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       await settle(page);
       const controls = await page.evaluate((args) => {
-        const [danger, opener, allow, isRemote, sel] = args;
-        const D = new RegExp(danger, 'i'), O = new RegExp(opener, 'i');
+        const [danger, opener, allow, isRemote, sel, lookName] = args;
+        const D = new RegExp(danger, 'i'), O = new RegExp(opener, 'i'), L = new RegExp(lookName, 'i');
         const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
         const out = [];
         document.querySelectorAll(sel).forEach((el, i) => {
@@ -587,8 +806,11 @@ try {
           const showsItOpens = (el.hasAttribute('aria-haspopup') && el.getAttribute('aria-haspopup') !== 'false') || el.hasAttribute('aria-expanded') || el.tagName === 'SUMMARY' || (!!link && !/^(#|javascript:|)$/i.test((link.getAttribute('href') || '').trim()));
           const allowed = allow.some(a => name.toLowerCase().includes(a));
           const toggle = el.matches('[role=switch], [role=checkbox], [role=menuitemcheckbox], [aria-pressed], [aria-checked]');
+          // A theme switcher that steps through its options on each click changes a preference.
+          const look = L.test(aria || text) && !opens;
           let click = true, why = '';
           if (toggle) { click = false; why = 'a switch: flipped only with the owner\'s yes (--use)'; }
+          else if (look) { click = false; why = 'a theme switcher: its options are picked only with the owner\'s yes, or when not signed in (see Option controls)'; }
           else if (D.test(name) && !allowed) { click = false; why = 'risky word'; }
           else if (submit && !allowed) { click = false; why = 'submits a form'; }
           else if (isRemote && makes && !allowed && !showsItOpens) { click = false; why = 'could create an item'; }
@@ -597,7 +819,7 @@ try {
           out.push({ i, name: name || '(no name)', iconOnly, hasName: !!name, click, why, y: Math.round(r.top) });
         });
         return out;
-      }, [DANGER.source, OPENER.source, allow, remote, CONTROLS]);
+      }, [DANGER.source, OPENER.source, allow, remote, CONTROLS, LOOK_NAME.source]);
 
       // Markers on list items (star, pin, bookmark...), read before anything is opened. Whether a
       // filter for them exists is decided after the menus on this page have been opened and read.
@@ -696,6 +918,9 @@ try {
       }
       // With the owner's yes: the switches that sit on the page itself.
       if (USE && firstWidth) await flipToggles({ url, width, routeId, opener: null, reopen: null });
+      // With the owner's yes, or when not signed in: pick each option of the theme switchers, view
+      // toggles and segmented controls, and see whether an option vanishes.
+      if (PICK && firstWidth) await optionPass(url, width);
       // Reduced motion, once per page: ask for less motion, load the page again, and open one menu.
       if (firstWidth) {
         await page.emulateMedia({ reducedMotion: 'reduce' }).catch(() => {});
@@ -775,14 +1000,17 @@ const backs = [...backControls.values()].map(b => ({ ...b, routes: b.routes.map(
 const merged = mergeLeads(found.map((f, i) => ({ ...f, id: `E${i}` })), widths, local);
 merged.forEach((l, i) => { l.id = `E${String(i + 1).padStart(2, '0')}`; if (!['clipped-text', 'no-name', 'back-goes-elsewhere'].includes(l.kind)) l.what = l.what.replace(/ \(at \d+ wide only\)$/, ''); });
 const heldSwitches = toggles.filter(t => t.held_by);
+const picked = optionRows.filter(r => r.picks.length);
 const use = { enabled: USE, switches_found: toggles.length, switches_flipped: flipped.length, turned_back: flipped.filter(t => t.restored).length, not_turned_back: flipped.filter(t => !t.restored).map(t => t.switch),
+  // Option picks count as actions only when they ran on the owner's yes (--use). Without it they ran signed out.
+  option_controls_used: picked.length, option_picks: USE ? picked.reduce((a, r) => a + r.picks.length, 0) : 0, options_not_put_back: picked.filter(r => r.restored === false && !r.back_after_reload).map(r => r.control), options_back_after_reload: picked.filter(r => r.restored === false && r.back_after_reload).map(r => r.control),
   limits: limits ? { file: limits.file, owner_words: limits.owner_words, held_actions: limits.held.map(h => h.action), held_switches: heldSwitches.map(t => ({ switch: t.switch, page: t.page, held_by: t.held_by })) } : null };
 const unique = [...explored.values()];
 const wasClicked = r => !/^not clicked|^could not click/.test(r.result || '');
 const openedCount = unique.filter(r => /^(opened|went|changed)/.test(r.result || '')).length;
 const notClicked = unique.filter(r => /^not clicked/.test(r.result || ''));
 const totals = { controls: unique.length, clicked: unique.filter(wasClicked).length, opened_something: openedCount, did_nothing: unique.filter(r => r.result === 'nothing visible happened').length, not_clicked: notClicked.length, caused_errors: unique.filter(r => r.errors.length).length };
-writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
+writeFileSync(join(outDir, 'explore.json'), JSON.stringify({ target, widths, signed_in_with: ctx.mode !== 'none' ? ctx.label : null, totals, use, controls: rows, switches: toggles, options: optionRows, back_controls: backs, tab_groups: tabGroups, leads: merged }, null, 2) + '\n');
 const md = ['# Explore: every safe control', '',
   `${totals.controls} control(s) at ${widths.join(' and ')} wide: ${totals.opened_something} opened something, ${totals.did_nothing} did nothing visible, ${totals.not_clicked} not clicked, ${totals.caused_errors} caused errors.`, '',
   `For the pain map header: **Controls opened: ${totals.clicked} of ${totals.controls}**`, '',
@@ -795,6 +1023,10 @@ const md = ['# Explore: every safe control', '',
     '| Page | Opened from | Switch | Was | Flipped to | Ends | What appeared away from the switch | Before | After |', '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...(toggles.length ? toggles.map(t => `| ${t.page} | ${t.opener || '(on the page)'} | ${t.switch.replace(/\|/g, '/')} | ${t.before === 'true' ? 'on' : 'off'} | ${t.skipped ? `not flipped: ${t.skipped}` : (t.after === 'true' ? 'on' : t.after === 'false' ? 'off' : t.after)} | ${t.skipped ? '' : (t.restored ? 'back as it was' : `NOT RESTORED (${t.final})`)} | ${t.added.map(a => `"${a.text}"${a.near_message_box ? ' (near the message box)' : ''}`).join(', ').replace(/\|/g, '/')}${t.url_changed ? ' · the URL changed' : ''} | ${t.shots.before || ''} | ${t.shots.after || ''} |`) : ['| none | | No switches found | | | | | | |'])]
     : ['', '## Switches', '', 'Not flipped. Flipping switches needs the owner\'s yes to "use the app like a real user" (then run this again with `--use`). Until then, write in Not verified: "How features behave when used (switches, sending, results)".']),
+  '', '## Option controls', '', ...(optionRows.length ? [`${PICK ? (USE ? 'Picked with the owner\'s yes' : 'Picked because the run was not signed in (nothing is saved to an account)') : 'Not picked'}: each option of a theme switcher, view toggle or segmented control in turn, then the first state again. An option that can no longer be picked afterwards is an option-vanished lead.${USE && picked.length ? ` Count each pick as one action in the header's "Used as a user" count (${use.option_picks} picks).` : ''}${use.options_not_put_back.length ? ` **Not put back: ${use.options_not_put_back.join(', ')}. Tell the owner and list it in Left behind.**` : ''}${use.options_back_after_reload.length ? ` Back only after a reload: ${use.options_back_after_reload.join(', ')}.` : ''}`, '',
+    '| Page | Control | Kind | Options at first | Was on | After each pick | Vanished | Ends |', '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...optionRows.map(r => `| ${r.page} | ${r.control.replace(/\|/g, '/')} | ${r.form} | ${r.options_before.join(', ').replace(/\|/g, '/')} | ${r.was || ''} | ${r.skipped ? `not picked: ${r.skipped}` : r.picks.map(p => `${p.picked}: ${p.shows.join(', ')}`).join(' · ').replace(/\|/g, '/')} | ${r.vanished.map(v => v.option).join(', ')} | ${r.skipped ? '' : r.restored === false ? (r.back_after_reload ? 'back after a reload' : `NOT PUT BACK (${r.ends_on || 'unknown'})`) : r.restored ? 'back as it was' : 'nothing was selected before'} |`)]
+    : [PICK ? 'No theme switcher, view toggle or segmented control was found.' : 'Not checked. Picking options needs the owner\'s yes (run this again with `--use`).']),
   '', '## Back controls', '', ...(backs.length ? ['Each in-app back control was reached from another page and clicked. It should land on the page the user came from.', '', '| Back control | On page | Width | Came from | Landed on | Result |', '| --- | --- | --- | --- | --- | --- |',
     ...backs.flatMap(b => b.routes.map(r => `| ${b.control.replace(/\|/g, '/')} | ${r.went_to} | ${r.width} | ${r.came_from} | ${r.landed_on || ''} | ${r.result === 'went elsewhere' ? '**went elsewhere**' : r.result} |`))]
     : ['No in-app back control was found on a page reached from another page.']),

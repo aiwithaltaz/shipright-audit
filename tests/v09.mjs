@@ -110,6 +110,37 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
       leads.length === 2 && /prints over it/.test(by('message box').what) && /has no background/.test(by('top bar').what) && leads.every(l => l.widths.join() === '1280,390' && l.shot && existsSync(join(bare.o, l.shot)) && l.detail.scrolled_to > 0), say(leads));
     ok('see-through-layer: the same page with solid backgrounds gives none', solid.json.leads.length === 0, say(solid.json.leads));
   }
+
+  // Step 6. Options must not vanish after use. A theme switcher showing System, Light and Dark that
+  // drops System after one click: 1 lead. One that keeps all 3 gives none and ends as it started.
+  // The same holds for a button that steps through the themes, and for a menu of themes.
+  // Signed in, nothing is picked without --use.
+  if (want('options') && hasPw) {
+    const run = async (page, extra = []) => {
+      const app = await serveFixture(`tests/fixtures/options-app/${page}.html`);
+      const o = tmp('v09-options');
+      const r = await runNode([S + 'explore.mjs', app.url, '--widths', '1280', ...extra, '--out', o]);
+      app.stop();
+      const j = readJson(join(o, 'explore.json'), { leads: [{ kind: 'did not run', what: r.err.slice(0, 200), widths: [] }], options: [], use: {} });
+      return { o, hits: app.hits, json: j, leads: j.leads.filter(l => /^option-|did not run/.test(l.kind)), row: (j.options || [])[0] || { picks: [], vanished: [] } };
+    };
+    const drops = await run('index'), keeps = await run('keeps'), cycle = await run('cycle'), menu = await run('menu');
+    ok('option-vanished: a theme switcher that drops System after one click is 1 lead',
+      drops.leads.length === 1 && drops.leads[0].kind === 'option-vanished' && /it offered System, Light, Dark\. After picking "Light" it only offers Light, Dark, so "System" can no longer be picked/.test(drops.leads[0].what)
+      && /only a reload put it back/.test(drops.leads[0].what) && !!drops.leads[0].shot && existsSync(join(drops.o, drops.leads[0].shot)), say(drops.leads));
+    ok('option-vanished: a theme switcher that keeps all 3 options gives none, and ends on the option it started on',
+      keeps.leads.length === 0 && keeps.row.picks.length === 3 && keeps.row.restored === true && keeps.hits[keeps.hits.length - 1] === 'theme=system', `${say(keeps.leads)}; picks: ${keeps.hits.join(' ')}`);
+    ok('option-vanished: a button that steps through the themes and never comes back to System is 1 lead, a menu that keeps all 3 gives none',
+      cycle.leads.length === 1 && cycle.row.form === 'cycle' && /"Theme: System" can no longer be picked/.test(cycle.leads[0].what) && menu.leads.length === 0 && menu.row.form === 'menu' && menu.row.picks.length === 3 && menu.row.restored === true,
+      `cycle: ${say(cycle.leads)}; menu: ${say(menu.leads)} (${menu.row.form}, ${menu.row.picks.length} picks)`);
+    // Signed in (a session file): no option is picked without the owner's yes. With --use each pick is counted.
+    const sess = join(tmp('v09-sess'), 'session.json');
+    writeFileSync(sess, JSON.stringify({ cookies: [{ name: 'sr_test', value: '1', domain: '127.0.0.1', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax' }], origins: [] }));
+    const held = await run('keeps', ['--session', sess]), used = await run('keeps', ['--session', sess, '--use']);
+    ok('signed in, options are picked only with --use, and each pick counts as an action',
+      held.hits.length === 0 && (held.json.options || []).length === 0 && held.json.use.option_picks === 0 && used.hits.length === 3 && used.json.use.option_picks === 3 && used.row.restored === true,
+      `without --use: ${held.hits.length} pick(s); with --use: ${used.hits.length} pick(s), ${used.json.use.option_picks} counted`);
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
