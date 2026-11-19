@@ -182,10 +182,13 @@ export async function run09(ok, { hasPw, only = [] } = {}) {
     ok('on a live app only sign-in fields are typed into, 1 character at most, and nothing is submitted',
       floating.hits.length > 0 && [floating, vanishing, hint].every(x => typedOnly(x.hits)) && profile.hits.length === 0 && profile.leads.length === 1 && profile.fields.every(f => !f.typed),
       `sign-in: ${floating.hits.join(' ')}; profile form: ${profile.hits.length} call(s), ${say(profile.leads)}`);
-    const rail = explore('tests/fixtures/rail-app/index.html', ['--widths', '1280']), bare = explore('tests/fixtures/rail-app/bare.html', ['--widths', '1280']);
+    // The rail sits in the top-left corner, where the pointer used to be parked (and where it starts on
+    // Linux). A second page with the same rail must still see icons, not words: the pointer now rests in
+    // the bottom-right corner, before the controls are listed and after every hover.
+    const rail = explore('tests/fixtures/rail-app/index.html', ['--routes', 'second.html', '--widths', '1280']), bare = explore('tests/fixtures/rail-app/bare.html', ['--widths', '1280']);
     const tips = j => j.leads.filter(l => l.kind === 'no-tooltip');
     ok('a rail that opens on hover counts as labeled: no no-tooltip leads',
-      tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 3 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')),
+      tips(rail.json).length === 0 && rail.json.controls.filter(c => c.icon_only).length === 6 && rail.json.controls.filter(c => c.icon_only).every(c => /^label shown on hover/.test(c.tooltip || '')),
       `${say(tips(rail.json))}; ${rail.json.controls.filter(c => c.icon_only).length} icon-only control(s): ${rail.json.controls.map(c => `${c.control}${c.icon_only ? '' : ' (seen with words)'}: ${c.tooltip || 'no tooltip'}`).join(' | ')}`);
     ok('the same rail with no labels on hover still gives 3 no-tooltip leads', tips(bare.json).length === 3, say(tips(bare.json)));
   }

@@ -89,7 +89,7 @@
 // format is in browser.mjs). --use reads it (--limits <file>, or the nearest one above --out) and holds
 // every switch whose name matches a held action: it is listed as held, with the owner's words, never flipped.
 // Writes explore.json, explore.md and E##-*.png to --out. Exit 0 ran, 2 usage or missing Playwright.
-import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, normUrl, uncover, dialogList, dialogNote, DANGER } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, widthsFlag, viewportFor, analyzeScript, mergeLeads, settle, useLimits, heldBy, auditPaths, landedOn, normUrl, uncover, dialogList, dialogNote, parkMouse, DANGER } from './browser.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -983,6 +983,10 @@ try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       await settle(page);
       await uncover(page, 'explore'); // a "What's new" dialog over the page: Escape first, then X, then OK
+      // Rest the pointer in the bottom-right corner before the controls are listed: left on a rail that
+      // opens on hover, it would keep the rail open and its icons would be listed with their words.
+      await parkMouse(page);
+      await page.waitForTimeout(250);
       const controls = await page.evaluate((args) => {
         const [danger, opener, allow, isRemote, sel, lookName] = args;
         const D = new RegExp(danger, 'i'), O = new RegExp(opener, 'i'), L = new RegExp(lookName, 'i');
@@ -1060,7 +1064,7 @@ try {
               if (rail && was !== null && rail.getBoundingClientRect().width - was >= 40 && name && [...rail.querySelectorAll('*')].some(x => !el.contains(x) && vis(x) && (x.innerText || '').replace(/\s+/g, ' ').trim().toLowerCase() === name)) return `label shown on hover: the rail opens and shows "${name}"`;
               return null;
             }, [sel, railBefore]).catch(() => null);
-            await page.mouse.move(0, 0).catch(() => {});
+            await parkMouse(page);
             if (!row.tooltip) lead('no-tooltip', `Icon-only control "${c.name}" shows no tooltip on hover${c.hasName ? '' : ' and has no name for screen readers'}`, url, width);
           } else if (c.iconOnly && !c.hasName) lead('no-name', `An icon-only control has no name for screen readers`, url, width);
           if (!c.click) { row.result = `not clicked: ${c.why}`; rows.push(row); continue; }

@@ -4,18 +4,16 @@
 <style>
 * { box-sizing: border-box; }
 body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; display: flex; min-height: 100vh; }
-.top { position: fixed; left: 0; right: 0; top: 0; height: 48px; display: flex; align-items: center; padding: 0 16px; background: #fff; border-bottom: 1px solid #8a8a84; }
-.rail { position: fixed; left: 0; top: 48px; bottom: 0; width: 56px; background: #20211f; padding: 12px 8px; display: flex; flex-direction: column; gap: 6px; transition: width .12s; overflow: hidden; }
+.rail { position: fixed; left: 0; top: 0; bottom: 0; width: 56px; background: #20211f; padding: 12px 8px; display: flex; flex-direction: column; gap: 6px; transition: width .12s; overflow: hidden; }
 .rail button { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: #f0f0ec; font: inherit; white-space: nowrap; }
 .rail svg { flex: none; }
 .rail .word { display: none; }
 .rail:hover { width: 200px; }
 .rail:hover .word { display: inline; }
-main { flex: 1; padding: 72px 24px 24px 80px; }
+main { flex: 1; padding: 24px 24px 24px 80px; }
 dialog { border: 1px solid #6b6b66; border-radius: 10px; padding: 20px; }
 </style></head>
 <body>
-<header class="top"><strong>Studio</strong></header>
 <nav class="rail" aria-label="Main">
   <button type="button" aria-label="Projects" aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="11" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="word">Projects</span></button>
   <button type="button" aria-label="Library" aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="word">Library</span></button>

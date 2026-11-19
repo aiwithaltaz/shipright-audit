@@ -23,7 +23,7 @@
 // Labels file: { "remove": ["Remove"], "save": ["Save"] }. A data-action value must use one of those words.
 //
 // --profile / --session: stay signed in (see crawl.mjs). The profile is tried first.
-import { openContext, signInFlags, openTarget, pagesToVisit, settle, auditFolder, auditPaths, landedOn, DANGER, uncover, dialogList, dialogNote } from './browser.mjs';
+import { openContext, signInFlags, openTarget, pagesToVisit, settle, auditFolder, auditPaths, landedOn, DANGER, uncover, dialogList, dialogNote, parkMouse } from './browser.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
@@ -214,7 +214,10 @@ try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => null);
       await settle(page);
       await uncover(page, 'consistency');
-      await page.mouse.move(0, 0).catch(() => {});
+      // Rest the pointer in the bottom-right corner before the components are listed: at (0, 0) it sits on a
+      // left rail, and a rail that opens on hover would be measured open.
+      await parkMouse(page);
+      await page.waitForTimeout(250);
       const found = await page.evaluate(COMPONENTS, DANGER.source).catch(() => []);
       for (const c of found) {
         const variants = kinds.get(c.kind) || [];

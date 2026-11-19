@@ -136,6 +136,15 @@ export function dialogNote(local = u => u) {
     ...list.map(d => `| ${d.page} | ${d.dialog.replace(/\|/g, '/')} | ${d.how || 'not closed: left open'} |`)];
 }
 
+// Where the pointer rests between actions: the bottom-right corner of the viewport. Not the top-left
+// corner (0, 0): a left rail or sidebar sits there, and a rail that opens on hover would stay open, so
+// its icons would be read with their words and never checked for a tooltip. On Linux the pointer also
+// starts at (0, 0), so it is parked before the controls of a page are listed, not only after a hover.
+export async function parkMouse(page) {
+  const size = page.viewportSize() || await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => null) || { width: 1280, height: 800 };
+  await page.mouse.move(Math.max(0, size.width - 1), Math.max(0, size.height - 1)).catch(() => {});
+}
+
 // One spelling per page, so "https://app.com" and "https://app.com/" are not audited twice.
 export function normUrl(u) {
   try { const x = new URL(u); if (x.pathname.length > 1) x.pathname = x.pathname.replace(/\/+$/, ''); return x.href; } catch { return u; }
