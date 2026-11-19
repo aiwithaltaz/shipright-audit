@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Account</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; }
+main { max-width: 760px; margin: 0 auto; padding: 24px; }
+h1 { margin: 0 0 16px; font-size: 24px; }
+.subnav { display: flex; gap: 16px; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 16px; }
+p { margin: 0 0 8px; }
+</style></head>
+<body>
+<main id="app"></main>
+<script>
+  const pages = {
+    '#/account/profile': ['Profile', 'Name: Sam Rivera'],
+    '#/account/security': ['Security', 'Two sign-in methods are set up.'],
+    '#/account/plan': [null, 'You are on the Team plan.'],
+  };
+  const draw = () => {
+    const [title, line] = pages[location.hash] || pages['#/account/profile'];
+    document.getElementById('app').innerHTML = (title ? '<h1>' + title + '</h1>' : '')
+      + '<nav class="subnav"><a href="#/account/profile">Profile</a><a href="#/account/security">Security</a><a href="#/account/plan">Plan</a></nav><p>' + line + '</p>';
+  };
+  addEventListener('hashchange', draw);
+  draw();
+</script>
+</body>
+</html>

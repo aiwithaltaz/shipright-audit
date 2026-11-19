@@ -1,0 +1,17 @@
+{
+  "description": "On each start, fetches a newer ShipRight Audit into the saved copy of its marketplace, so the owner only has to click Update. Prints one line only when it fetched something. Turn it off with SHIPRIGHT_NO_UPDATE_CHECK=1.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/shipright-audit/scripts/version.mjs\" --fetch --quiet --hook",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

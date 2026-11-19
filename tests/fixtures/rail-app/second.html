@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Studio desk</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; display: flex; min-height: 100vh; }
+.rail { position: fixed; left: 0; top: 0; bottom: 0; width: 56px; background: #20211f; padding: 12px 8px; display: flex; flex-direction: column; gap: 6px; transition: width .12s; overflow: hidden; }
+.rail button { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 10px; border: 0; border-radius: 8px; background: none; color: #f0f0ec; font: inherit; white-space: nowrap; }
+.rail svg { flex: none; }
+.rail .word { display: none; }
+.rail:hover { width: 200px; }
+.rail:hover .word { display: inline; }
+main { flex: 1; padding: 24px 24px 24px 80px; }
+dialog { border: 1px solid #6b6b66; border-radius: 10px; padding: 20px; }
+</style></head>
+<body>
+<nav class="rail" aria-label="Main">
+  <button type="button" aria-label="Inbox" aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="11" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="word">Inbox</span></button>
+  <button type="button" aria-label="Calendar" aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="word">Calendar</span></button>
+  <button type="button" aria-label="Files" aria-haspopup="dialog"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M4 16V8M10 16V4M16 16v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="word">Files</span></button>
+</nav>
+<main><h1>Desk</h1><p>One message is waiting.</p></main>
+<dialog id="d"><p>Nothing here yet.</p></dialog>
+<script>
+  document.querySelectorAll('.rail button').forEach(b => b.onclick = () => document.getElementById('d').showModal());
+</script>
+</body>
+</html>

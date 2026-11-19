@@ -22,7 +22,7 @@
 // Needs Node 18+ and Playwright with Chromium.
 // If Playwright is missing: prints one install command and exits 2.
 import { createRequire } from 'node:module';
-import { openContext, signInFlags, settle, normUrl, linkPattern, landedOn, auditFolder } from './browser.mjs';
+import { openContext, signInFlags, settle, normUrl, linkPattern, landedOn, auditFolder, uncover, dialogList, dialogNote } from './browser.mjs';
 import { createServer } from 'node:http';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve, join, dirname, extname, sep, basename } from 'node:path';
@@ -156,6 +156,7 @@ const PER_LIST = 6;
 try {
   await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
   let settled = await settle(page);
+  await uncover(page, 'crawl'); // a "What's new" dialog over the page: Escape first, then X, then OK
   screens.push({ ...(await snapshot(page, 's01', false)), settled });
   // The demo sign-in is for local sample apps. Never press a form's button when we came in signed in.
   const did = usingSignIn ? false : await signIn(page);
@@ -194,6 +195,7 @@ try {
     seen.add(next);
     await page.goto(next, { waitUntil: 'domcontentloaded', timeout: 15000 });
     settled = await settle(page);
+    await uncover(page, 'crawl');
     n += 1;
     const id = `s${String(n).padStart(2, '0')}`;
     const shot = { ...(await snapshot(page, id, true)), settled };
@@ -224,7 +226,7 @@ const unsettled = screens.filter(s => s.settled === false).map(s => s.id);
 // A screen that asks for a password after we came in signed in may mean the app signed us out mid-crawl.
 const askedLater = usingSignIn ? screens.filter((s, i) => i > 0 && s.asks_password).map(s => s.id) : [];
 const lists = [...itemLists.values()].map(l => ({ pattern: l.pattern, links: l.links.size, crawled: [...l.links].filter(u => seen.has(u)).length })).filter(l => l.links > l.crawled);
-const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, landed_url: landedUrl, login_wall: loginWall, empty_screens: emptyScreens, unsettled, item_lists: lists, screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
+const report = { target, signed_in_session: usingSignIn, signed_in_with: usingSignIn ? opened.label : null, landed_url: landedUrl, login_wall: loginWall, empty_screens: emptyScreens, unsettled, item_lists: lists, dialogs_closed: dialogList(u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '')), screens: screens.map(({ links, link_labels, ...rest }) => rest), label_drift: labelDrift };
 writeFileSync(join(outDir, 'crawl.json'), JSON.stringify(report, null, 2));
 const md = ['# Crawl', '', `| Screen | Route | Signed in | H1 | Actions | Fields | Errors |`, `| --- | --- | --- | --- | --- | --- | --- |`];
 for (const s of report.screens) {
@@ -240,6 +242,7 @@ if (labelDrift.length) {
   for (const d of labelDrift) md.push(`| ${d.target.replace(/^https?:\/\/[^/]+/, '')} | ${d.labels.join(' / ')} | ${Object.entries(d.where).map(([l, ss]) => `${l}: ${ss.join(', ')}`).join('; ')} |`);
 }
 if (lists.length) md.push('', '## Item lists (only the first few of each were crawled)', '', '| Pattern | Links found | Crawled |', '| --- | --- | --- |', ...lists.map(l => `| ${l.pattern} | ${l.links} | ${l.crawled} |`), '', 'Each list is one kind of screen. `samples.mjs` opens more of them, read-only, and checks what they hold.');
+md.push(...dialogNote(u => u.replace(/^https?:\/\/127\.0\.0\.1:\d+/, '')));
 writeFileSync(join(outDir, 'crawl.md'), md.join('\n') + '\n');
 if (wantJson) console.log(JSON.stringify(report));
 else console.log(`crawl: ${report.screens.length} screens in ${outDir}${usingSignIn ? ` (signed in with ${opened.label})` : ''}${loginWall ? ' · LOGIN WALL: every screen asks for a password' : ''}${emptyScreens ? ` · ${emptyScreens} empty screen(s)` : ''}${labelDrift.length ? ` · label drift on ${labelDrift.length} destination(s), see crawl.md` : ''}`);

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Reader</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; background: #fff; }
+html[data-theme=dark] body { background: #1d1e1c; color: #f0f0ec; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; border-bottom: 1px solid #8a8a84; }
+main { max-width: 640px; margin: 0 auto; padding: 24px; }
+.seg { display: inline-flex; border: 1px solid #6b6b66; border-radius: 8px; overflow: hidden; }
+.seg button, .one { padding: 8px 12px; border: 0; background: #fff; color: #1c1c1c; font: inherit; }
+.one { border: 1px solid #6b6b66; border-radius: 8px; }
+.seg button[aria-pressed=true] { background: #1a56db; color: #fff; }
+.menu { position: absolute; right: 24px; top: 52px; background: #fff; color: #1c1c1c; border: 1px solid #6b6b66; border-radius: 8px; padding: 6px; display: grid; }
+.menu[hidden] { display: none; }
+.menu button { padding: 8px 12px; border: 0; background: none; font: inherit; text-align: left; }
+</style></head>
+<body>
+<header><strong>Reader</strong><button type="button" class="one" id="cycle" aria-label="Theme: System">Theme</button></header>
+<main><h1>Saved articles</h1><p>Four articles are waiting. The oldest is from Monday.</p></main>
+<script>
+  const tell = what => fetch('/api/' + what, { method: 'POST' }).catch(() => {});
+  const apply = t => { document.documentElement.dataset.theme = t; tell('theme=' + t); };
+  const order = ['System', 'Light', 'Dark'];
+  let at = 0;
+  const b = document.getElementById('cycle');
+  b.onclick = () => { at = at === 2 ? 1 : at + 1; b.setAttribute('aria-label', 'Theme: ' + order[at]); apply(order[at].toLowerCase()); };
+</script>
+</body>
+</html>

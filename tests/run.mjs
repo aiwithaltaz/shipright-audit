@@ -315,7 +315,9 @@ if (hasPw) {
   ok('reduced motion: a menu that still slides in is a lead', motionLead.length === 1 && /After opening "Menu"/.test(motionLead[0].what) && /transform/.test(motionLead[0].what), motionLead.map(l => l.what.slice(0, 90)).join(' | ') || 'no lead');
   // No false alarms from the new checks on the fixtures that were not built for them, or on a busy app.
   const loud = [];
-  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded', 'marker-no-filter'];
+  // The kinds added in 0.9 are in this list too: none of them may fire on a fixture that was not built for it.
+  const NEW = ['layout-shift', 'reduced-motion', 'component-drift', 'media-not-loaded', 'marker-no-filter',
+    'back-goes-elsewhere', 'tab-shift', 'tab-chrome-differs', 'option-vanished', 'option-not-restored', 'unlabeled-field', 'toggle-back-after-reload', 'faint-border', 'tight-padding', 'see-through-layer'];
   for (const f of ['mini-app', 'visual-app', 'explore-app', 'gated-app', 'phone-app', 'owner-rules-app', 'drift-app']) {
     const o1 = mkdtempSync(join(tmpdir(), 'fa-v-')), o2 = mkdtempSync(join(tmpdir(), 'fa-e-')), o3 = mkdtempSync(join(tmpdir(), 'fa-k-'));
     run([S7 + 'visual.mjs', `tests/fixtures/${f}/index.html`, '--no-click', '--out', o1]);
@@ -330,7 +332,7 @@ if (hasPw) {
   if (busyDrift.length) loud.push(`busy app: ${busyDrift.map(l => l.component).join(', ')}`);
   const busyNew = busy.leads.filter(l => NEW.includes(l.kind));
   if (busyNew.length) loud.push(`busy app (visual): ${busyNew.map(l => l.kind).join(', ')}`);
-  ok('drift, layout shift and reduced motion: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
+  ok('drift, layout shift, reduced motion and the 0.9 checks: no false alarms on the other fixtures or a busy app', loud.length === 0, loud.join(' | ') || '7 fixtures and 7 busy screens');
 }
 
 // 20. Everything added in 0.8 (tests/v08.mjs): the use-it answer and its limits, signin.json, items opened
@@ -339,6 +341,14 @@ if (hasPw) {
 {
   const { run08 } = await import('./v08.mjs');
   await run08(ok, { hasPw });
+}
+
+// 21. Everything added in 0.9 (tests/v09.mjs): back controls, sibling tabs, component borders, tight
+// padding, see-through layers, options that vanish, duplicate controls by what they open, the 3 false
+// alarms, the stability fixes and the update hook.
+{
+  const { run09 } = await import('./v09.mjs');
+  await run09(ok, { hasPw });
 }
 
 // 12. The gate runs from the command line with a relative path (the Windows bug in 0.3 skipped it silently)

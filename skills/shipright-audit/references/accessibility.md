@@ -24,7 +24,7 @@ For each check: run it with a script if you can, by hand if you cannot, and mark
 
 ## Forms
 
-- Every field has a visible label, not just placeholder text.
+- Every field has a visible label, not just placeholder text. A floating label counts: a label or hint that moves above the field on focus and stays in view while typing. Check by focusing the field and typing 1 character before you report it (`explore.mjs` does this and reports `unlabeled-field`). On a live app, type only into sign-in and search fields, and never submit.
 - Errors appear in text, next to the field, and say how to fix it.
 - **No re-entering** information the user already gave in the same process (WCAG 2.2, 3.3.7).
 - **Sign-in needs no memory or puzzle tests.** Paste and password managers work (WCAG 2.2, 3.3.8).

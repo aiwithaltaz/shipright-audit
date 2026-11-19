@@ -1,9 +1,9 @@
 # Visual craft lens
 
-Use in Step 5 (Pass 3). Look at each main screen at full desktop width, then at 390. Name the item (V1 to V13) a pain breaks.
-These are the problems a design lead spots in a second and usability checklists miss. `visual.mjs` measures V1, V2, V5, V6, V7, V8 and V9 to V13, and flags the clearest cases of V3 (too many labels on a card) and V4 (the only action buried at the bottom of a tall card). Density and placement still need your eyes on every main screen.
+Use in Step 5 (Pass 3). Look at each main screen at full desktop width, then at 390. Name the item (V1 to V16) a pain breaks.
+These are the problems a design lead spots in a second and usability checklists miss. `visual.mjs` measures V1, V2, V5, V6, V7, V8 and V9 to V16, and flags the clearest cases of V3 (too many labels on a card) and V4 (the only action buried at the bottom of a tall card). Density and placement still need your eyes on every main screen.
 
-Contents: V1 Pills · V2 Counts · V3 Density · V4 Where the main action sits · V5 Alignment · V6 Spacing · V7 Shape and elevation · V8 Layering · V9 Template text · V10 Faint icons · V11 Overflowing its box · V12 Duplicates on one screen · V13 Stacked control rows
+Contents: V1 Pills · V2 Counts · V3 Density · V4 Where the main action sits · V5 Alignment · V6 Spacing · V7 Shape and elevation · V8 Layering · V9 Template text · V10 Faint icons · V11 Overflowing its box · V12 Duplicates on one screen · V13 Stacked control rows · V14 Component borders · V15 Padding that matches · V16 Solid sticky and fixed layers
 
 ## V1. Pills and badges are labels, not sentences
 
@@ -81,7 +81,7 @@ An icon is a control or a label. If it is too light, the control is hidden.
 ## V11. Nothing sticks out of its box
 
 A chip, pill, badge or button belongs inside its card.
-- The script (`overflow-box`) flags one that sticks out of its card or container by more than 2px with nothing clipping it. Text that is cut off inside its box is the clipped-text lead, not this.
+- The script (`overflow-box`) flags one that sticks out of its card or container by more than 2px and more than 4% of the card's width, with nothing clipping it. A few pixels come and go with the fonts a computer has, so they are not reported. Text that is cut off inside its box is the clipped-text lead, not this.
 - Menus, tooltips and pop-overs are meant to overlap, and so is a small corner badge placed on purpose. They are skipped.
 - Usual cause: a row of chips that cannot wrap, or a fixed width that is too small for real data.
 - Pain example: "On recipe cards with 4 tags, the last 2 chips run out of the card and over the next one."
@@ -91,6 +91,7 @@ A chip, pill, badge or button belongs inside its card.
 
 - **The same text twice.** A summary in the page header and again in a side panel reads as a mistake and wastes the best space on the screen. The script (`duplicate-on-screen`) flags the same block of 40 characters or more in two sections. Cards or rows that share a description are data, not a duplicate.
 - **The same control twice.** Two "Profile" buttons, or a "Calendar" tab inside a page whose side navigation already has "Calendar". The user cannot tell whether they go to the same place. The script flags the same name in two navigations, and two navigations that link to the same place under different words. Footers, breadcrumbs, logos and Home links are normal repeats.
+- **The same job under two names.** A "Model: Auto" button in the message box and an "Auto (free)" button in the top bar that open the same list. Names and links do not match, so only `explore.mjs` finds it, by what each control opens: the same menu, or menus with over 80% of their options in common. The same menu on every row of a list is not a duplicate.
 - The lead reports both places. Decide which one stays.
 - Pain example: "'Calendar' is in the side navigation and is also a tab inside Projects, and both open the same calendar."
 - Cause: layout or flow. Severity: 2, or 3 when the two places show different things under one name.
@@ -103,11 +104,37 @@ A chip, pill, badge or button belongs inside its card.
 - Pain example: "Status tabs sit on one row and search and sort on the next, each under 40% wide: one row would lift the list by 50px."
 - Cause: layout. Severity: 1 or 2.
 
+## V14. Component borders can be seen
+
+An input, a dropdown or an outline button is found by its edge. When its fill is the same as the surface behind it, the border is the only thing that shows where it is.
+- That border needs a contrast of 3:1 against the surface it sits on (WCAG 1.4.11). A component whose fill contrasts at 3:1 or more needs no border.
+- The script (`faint-border`) measures inputs, text areas, dropdowns, dropdown triggers, custom checkboxes and radio buttons, and outline buttons, and reports the colors: `#3A3C39 on #2A2C29, 1.3:1`. It reports a border that is under 3:1 and also lost to the eye: a dark gray border on a dark surface. A light gray border on white (1.3:1 to 1.9:1) is under the WCAG number too, but people do see it, so it is not a lead: judge those yourself and say they fail 1.4.11 when the fields are hard to find.
+- Not measured: filled buttons, disabled controls, native checkboxes, and anything over a picture or a gradient.
+- Pain example: "On the dark settings card, inputs, dropdowns and the Cancel button are outlined in #3A3C39 on #2A2C29 (1.3:1): the fields cannot be found until they are clicked."
+- Cause: layout or access. Severity: 2, or 3 when a core form is affected.
+
+## V15. The same kind of surface has the same padding
+
+- Cards, notices, list rows and settings rows of one kind keep their content the same distance from the edge. One that is much tighter looks squeezed, and usually was missed when the others were fixed.
+- The script (`tight-padding`) groups surfaces that look alike (same fill, border, corner and shadow, side by side) and measures from the box edge to the nearest text, control or small image. It reports one whose padding is under 60% of the median of the others, or under 8px while the others use 12px or more. The crop shows the odd one next to a normal one. A picture that fills the card edge to edge does not count.
+- Reject it when the tight one is a different component on purpose (a compact row inside a dense table).
+- Pain example: "The Usage card has 4px of padding while the other 4 settings cards have 16px: its text touches the border."
+- Cause: layout. Severity: 1 or 2.
+
+## V16. Sticky and fixed layers have a solid background
+
+A top bar, a row of chips, a message box or a bottom bar that stays put while the page scrolls sits on top of the content. If it has no solid background, the content shows through it or prints over its words.
+- The scripts (`see-through-layer`, in `visual.mjs` and `samples.mjs`) scroll the content under every sticky and fixed layer and look for page text painted inside it with nothing solid in between. The screenshot is taken while the content is under the layer.
+- Meant to be see-through and skipped: a fade (a gradient), and a blur of 4px or more, where the text underneath cannot be read. A blur so weak that the text stays readable is a lead.
+- Look at long pages yourself: a result page with many messages shows this, an empty one does not.
+- Pain example: "Messages scroll under the message box and print over the placeholder and the footnote: the box has no background."
+- Cause: layout. Severity: 2, or 3 when it covers the place where the user types.
+
 ## Judging visual leads from visual.mjs
 
 - **Decide every lead.** Each one gets a row in Script leads: the pain it became, or "Rejected:" and what you saw. A lead dropped silently is how an audit misses what the owner spots in a second.
 - **Confirm on the crop.** Reject a lead when the difference is intended (a featured card) or invisible at normal size, and say which.
 - **Several leads, one pain.** Misaligned dates and a big gap in the same cards can be one pain ("Card footers float"), but each lead still gets its row pointing to it.
 - **Cite the crop** as the evidence for the pain.
-- **Cause:** usually layout (V3 to V8, V10 to V13) or copy (V1, V2, V9).
+- **Cause:** usually layout (V3 to V8, V10 to V16) or copy (V1, V2, V9).
 - **Severity:** usually 1 or 2. Use 3 when it hides the main action, misleads (V2), or repeats on every screen.

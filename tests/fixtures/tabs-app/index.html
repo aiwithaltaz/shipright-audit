@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace settings</title>
+<style>
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; margin: 0; color: #1c1c1c; display: flex; min-height: 100vh; }
+aside { width: 200px; border-right: 1px solid #ddd; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+main { flex: 1; padding: 24px; min-width: 0; }
+h1 { margin: 0 0 16px; font-size: 24px; }
+[role=tablist] { display: flex; gap: 4px; border-bottom: 1px solid #ddd; margin-bottom: 16px; }
+[role=tab] { padding: 10px 14px; border: 0; background: none; font: inherit; border-bottom: 2px solid transparent; }
+[role=tab][aria-selected=true] { border-bottom-color: #1a56db; }
+.back { display: block; width: 32px; height: 32px; margin-bottom: 8px; border: 1px solid #999; border-radius: 8px; background: #fff; }
+.panel p { margin: 0 0 8px; }
+@media (max-width: 600px) { aside { display: none; } }
+</style></head>
+<body>
+<aside><a href="#">Home</a><a href="#">Projects</a><a href="#">Settings</a></aside>
+<main>
+  <h1>Settings</h1>
+  <div role="tablist" aria-label="Settings sections">
+    <button role="tab" aria-selected="true" data-tab="general">General</button>
+    <button role="tab" aria-selected="false" data-tab="billing">Billing</button>
+    <button role="tab" aria-selected="false" data-tab="team">Team</button>
+  </div>
+  <div class="panel" role="tabpanel" id="panel"></div>
+</main>
+<script>
+  const text = { general: 'Workspace name: North Studio', billing: 'Plan: Team, renews 1 March', team: 'Four members, one invite pending' };
+  const show = id => {
+    document.querySelectorAll('[role=tab]').forEach(t => t.setAttribute('aria-selected', String(t.dataset.tab === id)));
+    document.getElementById('panel').innerHTML = (id === 'team' ? '<button class="back" aria-label="Back">&#8592;</button>' : '') + '<p>' + text[id] + '</p><p>Changes save when you leave the field.</p>';
+  };
+  document.querySelectorAll('[role=tab]').forEach(t => t.onclick = () => show(t.dataset.tab));
+  show('general');
+</script>
+</body>
+</html>
