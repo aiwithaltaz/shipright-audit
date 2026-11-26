@@ -24,9 +24,27 @@
 //                        background (WCAG 1.4.11), measured from the SVG stroke or fill or the icon font
 //                        color, with opacity included
 //   overflow-box         a chip, pill, badge or button that sticks out of its card by more than 2px
+//                        and more than 4% of the card's width (since 0.9: a few pixels of font
+//                        difference between computers stay quiet)
 //   duplicate-on-screen  the same text block (40 characters or more) in two sections, or the same
 //                        control in two navigations
 //   stacked-controls     2 rows of controls above one list, each under half the width: could be one row
+// Two checks added in 0.9 (V14 and V15 in references/visual-craft.md):
+//   faint-border         an input, dropdown, checkbox, radio button or outline button whose only boundary
+//                        is its border, with under 3:1 between that border and the surface behind it
+//                        (WCAG 1.4.11), and so close to it that the eye cannot find it (a lightness
+//                        contrast under 8 on the APCA scale: a dark gray border on a dark surface. A light
+//                        gray border on white scores 13 or more and is not a lead). Reported with the
+//                        colors: "#3A3C39 on #2A2C29, 1.3:1". A component whose fill contrasts at 3:1 or
+//                        more with the surface needs no visible border.
+//   tight-padding        one card, notice or row whose inner padding is under 60% of what the others
+//                        like it use, or under 8px while they use 12px or more
+// One more check lives in a second function at the end of this file, SHIPRIGHT_LAYERS (V16):
+//   see-through-layer    a sticky or fixed layer (top bar, chip, message box, bottom bar) with no solid
+//                        background, while page content sits under it. It looks at the page as it is
+//                        scrolled right now, so visual.mjs and samples.mjs scroll the content under each
+//                        layer first. By hand: scroll until content is under the bar, then run
+//                        "JSON.stringify(SHIPRIGHT_LAYERS())" after pasting this file.
 // A finding may carry "crop": a box in page pixels to screenshot when the problem is wider than one element.
 // It also returns "item_states": the status labels seen on repeated items ("Editing", "Rendering", "Ready").
 // Not a lead: an item type with 3 or more states needs an Item lifecycles table in the pain map (Step 2b).
@@ -447,11 +465,11 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   }
 
   // ---- Overflowing its box: a chip, pill, badge or button that sticks out of its card ---------------
-  // More than 2px outside the nearest boxed container (a border, a shadow or its own background), with
-  // nothing clipping it. Not flagged: menus, tooltips and pop-overs, and anything placed out of the
+  // More than 2px, and more than 4% of the box's width, outside the nearest boxed container (a border,
+  // a shadow or its own background), with nothing clipping it. Not flagged: menus, tooltips and pop-overs, and anything placed out of the
   // flow on purpose (absolute, fixed or sticky: a corner badge, a ribbon).
   {
-    const OUT = 2;
+    const OUT = 2, SHARE = 0.04;
     const POPUP = '[role=menu], [role=tooltip], [role=listbox], [popover], dialog, [class*=tooltip i], [class*=popover i], [class*=dropdown i]';
     const cands = new Set([...pills, ...document.querySelectorAll('button, [role=button], a[class*=btn i], a[class*=button i], [class*=chip i], [class*=badge i], [class*=pill i]')]);
     const boxed = el => {
@@ -488,8 +506,12 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
       const boxCs = getComputedStyle(box);
       if (boxCs.overflowX !== 'visible' || boxCs.overflowY !== 'visible') continue; // the card clips it: clipped-text reports that
       const b = box.getBoundingClientRect();
-      const out = Math.max(r.right - b.right, b.left - r.left, r.bottom - b.bottom, b.top - r.top);
-      if (out <= OUT) continue;
+      const sideways = Math.max(r.right - b.right, b.left - r.left), updown = Math.max(r.bottom - b.bottom, b.top - r.top);
+      const out = Math.max(sideways, updown);
+      // More than 2px, and more than 4% of the box it sticks out of (its width for sideways, its height
+      // for up and down). A few pixels come and go with the font a computer happens to have: the same
+      // chip can sit inside its card on a Mac and 6px outside it on Linux.
+      if (out <= OUT || out <= SHARE * (sideways >= updown ? b.width : b.height)) continue;
       const have = hits.get(box);
       if (!have || out > have.out) hits.set(box, { el: c, box, out: Math.round(out), text: text(c).slice(0, 40), n: (have ? have.n : 0) + 1 });
       else have.n++;
@@ -639,6 +661,187 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
     }
   }
 
+  // ---- Faint borders: a component whose outline cannot be seen (WCAG 1.4.11) ------------------------
+  // Inputs, text areas, dropdowns, dropdown triggers, checkboxes, radio buttons and outline buttons.
+  // When the fill is close to the surface behind it, the border is the only thing that shows where the
+  // component is, so the border needs 3:1 against that surface. The WCAG ratio alone would flag the
+  // light gray borders that most light themes use (1.3:1 to 1.9:1 on white), which people do see. So a
+  // lead also needs the border to be lost to the eye: a perceived lightness contrast under 8 (APCA Lc,
+  // which rates dark pairs far lower than the WCAG ratio does). "#3A3C39 on #2A2C29" scores 5.5 and is
+  // a lead. "#DDE1E8 on #FFFFFF" scores 18 and is not. Skipped: a component whose fill
+  // contrasts at 3:1 or more (it needs no border), a filled button (its fill and its words show where it
+  // is), disabled controls, native checkboxes and radio buttons (the browser draws them), and anything
+  // over a picture or a gradient, which cannot be measured.
+  {
+    const MIN = 3, LOST = 8;
+    // Perceived lightness contrast (APCA 0.0.98G), 0 to about 106. The sign (dark on light, or light on dark) is dropped.
+    const apca = (fg, bg) => {
+      const y = c => { const v = 0.2126729 * Math.pow(c.r / 255, 2.4) + 0.7151522 * Math.pow(c.g / 255, 2.4) + 0.072175 * Math.pow(c.b / 255, 2.4); return v > 0.022 ? v : v + Math.pow(0.022 - v, 1.414); };
+      const t = y(fg), b = y(bg);
+      return Math.abs(b > t ? (Math.pow(b, 0.56) - Math.pow(t, 0.57)) * 114 : (Math.pow(b, 0.65) - Math.pow(t, 0.62)) * 114);
+    };
+    const FIELD = 'input:not([type=hidden]):not([type=range]):not([type=file]):not([type=color]):not([type=image]):not([type=submit]):not([type=button]):not([type=reset]), textarea, select, [role=combobox], [role=textbox], [role=searchbox], [role=checkbox], [role=radio]';
+    const TRIGGER = 'button[aria-haspopup], [role=button][aria-haspopup]';
+    const BUTTON = 'button, [role=button], a[class*=btn i], a[class*=button i], input[type=submit], input[type=button]';
+    const HEX = c => hex(c).toUpperCase();
+    const fadeOf = el => { let o = 1; for (let x = el; x && x !== document.documentElement; x = x.parentElement) o *= Number(getComputedStyle(x).opacity); return o; };
+    // The colors that draw an element's edge: its border sides, or a ring made with a box shadow
+    // (no blur, spread of 1px or more). null: it has no edge. false: it has one that cannot be measured.
+    const edges = el => {
+      const cs = getComputedStyle(el), out = [];
+      for (const sd of ['Top', 'Right', 'Bottom', 'Left']) {
+        if (!(parseFloat(cs[`border${sd}Width`]) > 0) || ['none', 'hidden'].includes(cs[`border${sd}Style`])) continue;
+        const c = rgba(cs[`border${sd}Color`]);
+        if (!c) return false;
+        if (c.a > 0.02) out.push(c);
+      }
+      if (cs.boxShadow && cs.boxShadow !== 'none') {
+        for (const part of cs.boxShadow.split(/,(?![^(]*\))/)) {
+          const m = part.trim().match(/^(.+?)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?(\s+inset)?$/i);
+          if (!m || parseFloat(m[4]) > 1 || parseFloat(m[5] || 0) < 1 || Math.abs(parseFloat(m[2])) >= 1 || Math.abs(parseFloat(m[3])) >= 1) continue;
+          const c = rgba(m[1]);
+          if (c && c.a > 0.02) out.push(c);
+        }
+      }
+      return out.length ? out : null;
+    };
+    // What a person sees of one box: its fill over the surface, and its strongest edge against that surface.
+    const look = el => {
+      const cs = getComputedStyle(el);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return null;
+      const surface = backdrop(el), fill = rgba(cs.backgroundColor);
+      if (!surface || !fill) return null;
+      const fade = fadeOf(el);
+      const fillSeen = fill.a > 0.01 ? over({ ...fill, a: Math.min(1, fill.a * fade) }, surface) : surface;
+      const e = edges(el);
+      if (e === false) return null;
+      const seen = (e || []).map(c => over({ ...c, a: Math.min(1, c.a * fade) }, fillSeen)).sort((a, b) => contrast(b, surface) - contrast(a, surface))[0] || null;
+      return { surface, fill: contrast(fillSeen, surface), edge: seen, ratio: seen ? contrast(seen, surface) : null, lc: seen ? apca(seen, surface) : null };
+    };
+    const nameOf = el => {
+      const lab = (el.labels && el.labels[0]) || el.closest('label');
+      return (el.getAttribute('aria-label') || el.getAttribute('placeholder') || (lab && (ownText(lab) || text(lab))) || (el.matches(BUTTON) && (text(el) || el.value)) || el.getAttribute('title') || el.getAttribute('name') || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    };
+    const faint = [], judged = new Set();
+    const judge = (el, word, outlineOnly) => {
+      if (judged.has(el) || !inScope(el) || !shown(el)) return;
+      judged.add(el);
+      if (el.disabled || el.readOnly || el.getAttribute('aria-disabled') === 'true' || el.closest('[aria-disabled="true"], fieldset[disabled], [aria-hidden="true"]')) return;
+      const r = el.getBoundingClientRect();
+      if (r.width < 12 || r.height < 12 || r.height > 400) return;
+      if (el.matches('input[type=checkbox], input[type=radio]') && getComputedStyle(el).appearance !== 'none') return;
+      let box = el, l = look(el);
+      if (!l) return;
+      // A field with no border of its own is often drawn by its wrapper (an icon and an input inside
+      // one rounded box). Judge the nearest wrapper that hugs it and has an edge or a fill.
+      if (!l.edge && !outlineOnly) {
+        for (let x = el.parentElement, i = 0; x && i < 3 && x !== document.body; x = x.parentElement, i++) {
+          const w = x.getBoundingClientRect();
+          if (w.width > r.width + 140 || w.height > r.height + 48) break;
+          const lw = look(x);
+          if (!lw) return;
+          if (lw.edge || lw.fill >= 1.1) { box = x; l = lw; break; }
+        }
+      }
+      if (!l.edge || l.fill >= MIN || l.ratio >= MIN || l.lc >= LOST) return;
+      if (outlineOnly && l.fill >= 1.1) return; // a filled button, not an outline button
+      faint.push({ el: box, word, name: nameOf(el), ratio: Math.round(l.ratio * 10) / 10, lc: Math.round(l.lc * 10) / 10, border: HEX(l.edge), surface: HEX(l.surface) });
+    };
+    for (const el of document.querySelectorAll(FIELD)) judge(el, el.matches('select, [role=combobox]') ? 'dropdown' : el.matches('[type=checkbox], [role=checkbox]') ? 'checkbox' : el.matches('[type=radio], [role=radio]') ? 'radio button' : 'input', false);
+    for (const el of document.querySelectorAll(TRIGGER)) judge(el, 'dropdown', false);
+    for (const el of document.querySelectorAll(BUTTON)) judge(el, 'button', true);
+    if (faint.length) {
+      faint.sort((a, b) => a.ratio - b.ratio);
+      const f = faint[0];
+      const kinds = [...new Set(faint.map(x => x.word))];
+      const others = faint.slice(1, 4).map(x => `${x.word}${x.name ? ` "${x.name}"` : ''} ${x.border} on ${x.surface}, ${x.ratio.toFixed(1)}:1`);
+      add({ kind: 'faint-border', group: 'faint-border', what: `${faint.length === 1 ? `The outline of ${/^[aeiou]/.test(f.word) ? 'an' : 'a'} ${f.word} is` : `The outlines of ${faint.length} controls (${kinds.join(', ')}) are`} hard to see: the border of the ${f.word}${f.name ? ` "${f.name}"` : ''} is ${f.border} on ${f.surface}, ${f.ratio.toFixed(1)}:1 (component borders need 3:1)${others.length ? `. Also: ${others.join('; ')}` : ''}`,
+        detail: { count: faint.length, lowest: f.ratio, items: faint.slice(0, 10).map(x => ({ kind: x.word, name: x.name, border: x.border, background: x.surface, contrast: x.ratio, lightness_contrast: x.lc })) }, crop: pageBox([f.el.getBoundingClientRect()], 24) }, f.el);
+    }
+  }
+
+  // ---- Tight padding: one surface with much less inner padding than the others like it ---------------
+  // Surfaces of one kind (cards, notices, list rows, settings rows: the same tag, fill, border, corner
+  // and shadow, side by side) should keep their content the same distance from the edge. The padding
+  // is measured: from the box edge to the nearest text, control or small image, on the left and on the
+  // top. A picture that fills the box edge to edge does not count. A lead when one surface's padding
+  // is under 60% of the median of the others, or under 8px while the others use 12px or more.
+  {
+    const AWAY = 'nav, header, footer, table, [role=tablist], [role=menu], [role=listbox], [role=tooltip], [role=dialog], dialog, button, [role=button], select, textarea, label, svg';
+    const TAGS = new Set(['DIV', 'LI', 'SECTION', 'ARTICLE', 'A', 'ASIDE', 'DETAILS', 'FIELDSET', 'P', 'DL', 'BLOCKQUOTE']);
+    const look = el => {
+      const cs = getComputedStyle(el);
+      const sides = ['Top', 'Right', 'Bottom', 'Left'].filter(sd => parseFloat(cs[`border${sd}Width`]) > 0 && cs[`border${sd}Style`] !== 'none' && ((rgba(cs[`border${sd}Color`]) || { a: 0 }).a > 0.05)).length;
+      const own = rgba(cs.backgroundColor), behind = backdrop(el);
+      const shadow = !!cs.boxShadow && cs.boxShadow !== 'none';
+      let filled = false;
+      if (own && own.a >= 0.05 && behind) { const seen = over(own, behind); filled = Math.abs(seen.r - behind.r) + Math.abs(seen.g - behind.g) + Math.abs(seen.b - behind.b) > 12; }
+      if (!(sides >= 3 || shadow || filled)) return null;
+      return `${el.tagName}|${cs.backgroundColor}|${sides}|${cs.borderTopWidth} ${cs.borderTopColor}|${Math.round(radius(el))}|${shadow}`;
+    };
+    const bySig = new Map();
+    for (const el of document.querySelectorAll('body *')) {
+      if (!TAGS.has(el.tagName) || el.closest(AWAY) || !inScope(el) || !shown(el)) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 120 || r.height < 40 || r.height > 900 || isPill(el)) continue;
+      const k = look(el);
+      if (k) (bySig.get(k) || bySig.set(k, []).get(k)).push(el);
+    }
+    // Sets of 3 or more: siblings first, then cousins (cards in the columns of one grid).
+    const sets = [];
+    for (const els of bySig.values()) {
+      const cluster = (list, up) => { const m = new Map(); for (const el of list) { const k = up(el); if (k) (m.get(k) || m.set(k, []).get(k)).push(el); } return [...m.values()]; };
+      const loose = [];
+      for (const list of cluster(els, el => el.parentElement)) (list.length >= 3 ? sets.push(list) : loose.push(...list));
+      for (const list of cluster(loose, el => el.parentElement && el.parentElement.parentElement)) if (list.length >= 3) sets.push(list);
+    }
+    // Inner padding: how far the nearest content sits from the left and top edges.
+    const inset = el => {
+      const b = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      const x0 = b.left + (parseFloat(cs.borderLeftWidth) || 0), y0 = b.top + (parseFloat(cs.borderTopWidth) || 0);
+      const lifted = n => { for (let x = n; x && x !== el; x = x.parentElement) { const p = getComputedStyle(x).position; if (p === 'absolute' || p === 'fixed') return true; } return false; };
+      let left = Infinity, top = Infinity, n = 0;
+      const take = r => { if (r.width < 2 || r.height < 2) return; left = Math.min(left, r.left - x0); top = Math.min(top, r.top - y0); n++; };
+      const range = document.createRange();
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!t.textContent.trim() || !t.parentElement || !vis(t.parentElement) || lifted(t.parentElement)) continue;
+        range.selectNodeContents(t);
+        take(range.getBoundingClientRect());
+      }
+      for (const x of el.querySelectorAll('input:not([type=hidden]), select, textarea, button, img, svg, video, canvas')) {
+        if (!vis(x) || lifted(x)) continue;
+        const r = x.getBoundingClientRect();
+        // A picture that runs edge to edge is not padded content.
+        if (x.matches('img, video, canvas, svg') && (r.width >= b.width * 0.9 || (r.left - x0 <= 1 && r.top - y0 <= 1))) continue;
+        take(r);
+      }
+      return n ? Math.max(0, Math.round(Math.min(left, top))) : null;
+    };
+    const median = xs => { const a = xs.slice().sort((p, q) => p - q); return a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2; };
+    const tight = [];
+    for (const set of sets) {
+      const pads = set.map(el => ({ el, pad: inset(el) })).filter(x => x.pad !== null);
+      if (pads.length < 3) continue;
+      const odd = [];
+      for (const m of pads) {
+        const rest = pads.filter(x => x !== m).map(x => x.pad), med = median(rest);
+        // The others must agree with each other, or there is no usual padding to compare with.
+        if (rest.filter(v => Math.abs(v - med) <= Math.max(3, med * 0.25)).length < Math.ceil(rest.length * 0.6)) continue;
+        if ((med >= 8 && m.pad < med * 0.6 && med - m.pad >= 4) || (m.pad < 8 && med >= 12)) odd.push({ ...m, med: Math.round(med), others: rest.length });
+      }
+      if (odd.length && odd.length <= Math.max(1, Math.floor(pads.length / 3))) for (const o of odd) tight.push({ ...o, normal: pads.filter(x => !odd.some(y => y.el === x.el)).sort((p, q) => Math.abs(p.el.getBoundingClientRect().top - o.el.getBoundingClientRect().top) - Math.abs(q.el.getBoundingClientRect().top - o.el.getBoundingClientRect().top))[0] });
+    }
+    if (tight.length) {
+      tight.sort((a, b) => (a.pad / a.med) - (b.pad / b.med));
+      const t = tight[0], r = t.el.getBoundingClientRect();
+      const word = t.el.matches('[role=alert], [role=status], [role=note], [class*=notice i], [class*=alert i], [class*=banner i], [class*=callout i]') ? 'notice' : (t.el.tagName === 'LI' || r.width >= r.height * 5) ? 'row' : 'card';
+      const both = t.normal ? pageBox([r, t.normal.el.getBoundingClientRect()], 12) : null;
+      add({ kind: 'tight-padding', group: 'tight-padding', what: `One ${word} has much tighter padding than the others like it: ${t.pad}px, where the ${t.others} others use ${t.med}px${describe(t.el).includes('"') ? ` (${describe(t.el).slice(0, 70)})` : ''}${tight.length > 1 ? ` (and ${tight.length - 1} more like it)` : ''}`,
+        detail: { count: tight.length, items: tight.slice(0, 5).map(x => ({ what: describe(x.el).slice(0, 80), padding_px: x.pad, others_px: x.med, others: x.others })) }, crop: both && both.height <= 1000 ? both : pageBox([r], 12) }, t.el);
+    }
+  }
+
   // ---- Item states: the life of the things this app makes -------------------------------------------
   // Not a lead. Lists the status labels seen on repeated items (cards, rows): "Editing", "Rendering",
   // "Ready", "Posted". An item type with 3 or more states needs its life mapped before its buttons are
@@ -761,4 +964,168 @@ var SHIPRIGHT_ANALYZE = (opts = {}) => {
   const empty = /\b(no ([\w-]+ ){0,3}(yet|found)|nothing (here|yet)|get started|create your first|you (don't|do not) have any|is empty)\b/i.test(text(main));
   const kept = opts.only ? findings.filter(f => opts.only.includes(f.kind)) : findings;
   return { findings: kept, medianRadius, scale, counts, empty, style, shift, motion, item_states: itemStates, title: document.title, width: document.documentElement.clientWidth };
+};
+
+// ---- Sticky and fixed layers need a solid background (new in 0.9) -----------------------------------
+// Looks at the page as it is scrolled right now. For every element with position sticky or fixed that
+// sits over the page (a top bar, a chip, a message box, a bottom bar) it asks: is page content painted
+// inside its box with nothing solid in between?
+//   - The layer has a background that is not solid (under 90% opaque): any page text inside its box
+//     shows through.
+//   - The layer has no background at all, and holds words or controls with nothing solid behind them:
+//     page text inside its box shows, and prints over those words when it passes behind them.
+//     (A bare wrapper around solid parts is not a lead: a floating button with its own fill is fine.)
+// Skipped: a layer with a picture or gradient behind it (a fade is drawn on purpose), a blur of 4px
+// or more (frosted glass: the text underneath cannot be read), dialogs, menus, tooltips, toasts, a
+// layer that covers most of the screen, and side panels (content sits beside them, not under).
+// Returns { layers, open, scrollers, findings }. "scrollers" lists what can be scrolled, so a script
+// can move content under each layer and ask again. Each finding carries "box": the layer's place on
+// screen, for a screenshot taken while the content is under it.
+var SHIPRIGHT_LAYERS = () => {
+  const vw = innerWidth, vh = innerHeight;
+  const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.02; };
+  const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  let ctx = null;
+  const cache = new Map();
+  const rgba = value => {
+    if (!value) return null;
+    if (cache.has(value)) return cache.get(value);
+    let out = null;
+    const m = String(value).match(/^rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/);
+    if (m) out = { r: +m[1], g: +m[2], b: +m[3], a: m[4] === undefined ? 1 : (m[4].endsWith('%') ? parseFloat(m[4]) / 100 : +m[4]) };
+    else { try { if (!ctx) { const cv = document.createElement('canvas'); cv.width = cv.height = 1; ctx = cv.getContext('2d', { willReadFrequently: true }); } ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = value; ctx.fillRect(0, 0, 1, 1); const d = ctx.getImageData(0, 0, 1, 1).data; out = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 }; } catch (e) { out = null; } }
+    cache.set(value, out);
+    return out;
+  };
+  const blurOf = cs => { const m = String(cs.backdropFilter || cs.webkitBackdropFilter || '').match(/blur\(([\d.]+)px\)/); return m ? parseFloat(m[1]) : 0; };
+  const AWAY = '[role=dialog], dialog, [aria-modal=true], [role=tooltip], [role=menu], [role=listbox], [popover], [role=alert], [class*=toast i], [class*=snackbar i], [class*=tooltip i]';
+  const mark = el => { if (!el.dataset.srlayer) { window.__srLayerN = (window.__srLayerN || 0) + 1; el.dataset.srlayer = 'L' + window.__srLayerN; } return el.dataset.srlayer; };
+
+  // 1. The layers.
+  const layers = [];
+  const lifted = new WeakMap(); // element -> is it inside a fixed or sticky element?
+  const isLifted = el => {
+    if (!el || el === document.body || el === document.documentElement) return false;
+    if (lifted.has(el)) return lifted.get(el);
+    const p = getComputedStyle(el).position;
+    const v = p === 'fixed' || p === 'sticky' || isLifted(el.parentElement);
+    lifted.set(el, v);
+    return v;
+  };
+  for (const el of document.querySelectorAll('body *')) {
+    const cs = getComputedStyle(el);
+    if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+    if (!vis(el) || el.closest(AWAY) || parseInt(cs.zIndex, 10) < 0) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 16 || r.bottom <= 0 || r.top >= vh || r.right <= 0 || r.left >= vw) continue;
+    if (r.width * r.height > vw * vh * 0.5 || (r.height > vh * 0.7 && r.width < vw * 0.5)) continue;
+    if (layers.some(l => l.el.contains(el))) continue;
+    layers.push({ el, r, cs, sticky: cs.position === 'sticky' });
+  }
+
+  // 2. What can scroll: the page, and boxes that scroll inside it.
+  const scrollers = [];
+  const doc = document.scrollingElement || document.documentElement;
+  if (doc.scrollHeight - doc.clientHeight > 40) scrollers.push({ mark: 'document', max: doc.scrollHeight - doc.clientHeight, top: Math.round(doc.scrollTop), area: vw * vh });
+  for (const el of document.querySelectorAll('body *')) {
+    if (el.scrollHeight - el.clientHeight <= 40 || el.clientHeight < 120) continue;
+    const oy = getComputedStyle(el).overflowY;
+    if ((oy !== 'auto' && oy !== 'scroll') || !vis(el) || el.closest(AWAY)) continue;
+    if (!el.dataset.srs) { window.__srScrollN = (window.__srScrollN || 0) + 1; el.dataset.srs = 'S' + window.__srScrollN; }
+    scrollers.push({ mark: el.dataset.srs, max: el.scrollHeight - el.clientHeight, top: Math.round(el.scrollTop), area: el.clientWidth * el.clientHeight });
+  }
+  scrollers.sort((a, b) => b.area - a.area);
+
+  // 3. For each layer: is it solid? If not, where is it open?
+  const fadeTo = (node, root) => { let o = 1; for (let x = node; x; x = x.parentElement) { o *= Number(getComputedStyle(x).opacity); if (x === root) break; } return o; };
+  // What sits between a node inside the layer and the page behind it: 'solid', 'image', 'blur' or null.
+  const cover = (node, root) => {
+    for (let x = node; x; x = x.parentElement) {
+      const cs = getComputedStyle(x);
+      if (cs.backgroundImage && cs.backgroundImage !== 'none') return 'image';
+      const c = rgba(cs.backgroundColor);
+      if (c && c.a * fadeTo(x, root) >= 0.9) return 'solid';
+      if (blurOf(cs) >= 4) return 'blur';
+      if (x === root) break;
+    }
+    return null;
+  };
+  const open = [];
+  for (const l of layers) {
+    const c = rgba(l.cs.backgroundColor) || { a: 0 };
+    const alpha = c.a * Number(l.cs.opacity);
+    if ((l.cs.backgroundImage && l.cs.backgroundImage !== 'none') || alpha >= 0.9 || blurOf(l.cs) >= 4) continue;
+    const edged = ['Top', 'Right', 'Bottom', 'Left'].some(sd => parseFloat(l.cs[`border${sd}Width`]) > 0 && l.cs[`border${sd}Style`] !== 'none' && ((rgba(l.cs[`border${sd}Color`]) || { a: 0 }).a > 0.05)) || (l.cs.boxShadow && l.cs.boxShadow !== 'none');
+    // The layer's own words and controls that have nothing solid behind them.
+    const ink = [];
+    const range = document.createRange();
+    const walker = document.createTreeWalker(l.el, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      if (!t.textContent.trim() || !t.parentElement || !vis(t.parentElement) || cover(t.parentElement, l.el)) continue;
+      range.selectNodeContents(t);
+      const r = range.getBoundingClientRect();
+      if (r.width >= 4 && r.height >= 4) ink.push(r);
+    }
+    for (const x of l.el.querySelectorAll('input:not([type=hidden]), textarea, select, button, [role=button], [contenteditable="true"], [role=textbox]')) if (vis(x) && !cover(x, l.el)) ink.push(x.getBoundingClientRect());
+    // Parts of the layer that are solid by themselves (a filled button inside a bare wrapper).
+    const solids = [...l.el.querySelectorAll('*')].filter(x => vis(x) && cover(x, x) === 'solid').map(x => x.getBoundingClientRect());
+    // A bar with a see-through fill, an edge, or words of its own is a box: page text anywhere inside
+    // it shows. A bare wrapper around solid parts (a floating button) is not.
+    if (alpha > 0.02 || edged || ink.length) open.push({ ...l, alpha, box: true, ink, solids });
+  }
+
+  // 4. Page text that is on screen right now, cut to what its scrolling boxes let through.
+  const findings = [];
+  if (open.length) {
+    const seen = r => { for (const l of open) if (r.right > l.r.left && r.left < l.r.right && r.bottom > l.r.top && r.top < l.r.bottom) return true; return false; };
+    const clip = (el, r) => {
+      let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+      for (let x = el; x && x !== document.documentElement && x !== document.body; x = x.parentElement) {
+        const cs = getComputedStyle(x);
+        if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') { const k = x.getBoundingClientRect(); left = Math.max(left, k.left); top = Math.max(top, k.top); right = Math.min(right, k.right); bottom = Math.min(bottom, k.bottom); }
+        if (Number(cs.opacity) < 0.1 || cs.visibility === 'hidden') return null;
+      }
+      return right - left > 0 && bottom - top > 0 ? { left, top, right, bottom } : null;
+    };
+    const content = [];
+    const range = document.createRange();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+      const words = t.textContent.replace(/\s+/g, ' ').trim();
+      const p = t.parentElement;
+      if (words.length < 2 || !p || p.closest('script, style, noscript, template, [aria-hidden="true"]')) continue;
+      range.selectNodeContents(t);
+      const r0 = range.getBoundingClientRect();
+      if (r0.width < 4 || r0.height < 4 || r0.bottom <= 0 || r0.top >= vh || !seen(r0)) continue;
+      if (isLifted(p) || p.closest(AWAY) || !vis(p)) continue;
+      const r = clip(p, r0);
+      if (r) content.push({ r, words });
+    }
+    for (const l of open) {
+      let area = 0;
+      const texts = [];
+      let how = null;
+      for (const c of content) {
+        const hit = b => { const w = Math.min(c.r.right, b.right) - Math.max(c.r.left, b.left), h = Math.min(c.r.bottom, b.bottom) - Math.max(c.r.top, b.top); return w >= 8 && h >= 4 ? { w, h, x: Math.max(c.r.left, b.left) + w / 2, y: Math.max(c.r.top, b.top) + h / 2 } : null; };
+        let got = null;
+        for (const i of l.ink) { const h = hit(i); if (h) { got = h; how = 'prints over'; break; } }
+        if (!got && l.box) { const h = hit(l.r); if (h && h.w >= 12 && h.h >= 6 && !l.solids.some(s => h.x >= s.left && h.x <= s.right && h.y >= s.top && h.y <= s.bottom)) { got = h; how = how || 'shows through'; } }
+        if (!got) continue;
+        area += got.w * got.h;
+        if (!texts.includes(c.words)) texts.push(c.words);
+      }
+      if (!texts.length || area < 150) continue;
+      const wide = l.r.width >= vw * 0.6;
+      const word = l.el.querySelector('textarea, [contenteditable="true"], [role=textbox]') || l.el.matches('textarea, form') ? 'message box'
+        : l.el.matches('th, thead, tr') ? 'table header'
+        : wide && l.r.top <= 12 ? 'top bar' : wide && l.r.bottom >= vh - 12 ? 'bottom bar'
+        : /^H[1-6]$/.test(l.el.tagName) ? 'sticky heading' : l.r.width < 240 ? 'floating chip' : l.sticky ? 'sticky bar' : 'fixed bar';
+      const bg = l.alpha <= 0.02 ? 'no background' : `a see-through background (${Math.round(l.alpha * 100)}% opaque)`;
+      findings.push({ kind: 'see-through-layer', group: `see-through|${word}`, mark: mark(l.el),
+        what: `Content scrolls under the ${word} and ${how === 'prints over' ? 'prints over it' : 'shows through it'}: "${texts[0].slice(0, 60)}" can be read inside it, because the ${word} has ${bg}`,
+        detail: { layer: word, name: text(l.el).slice(0, 60), position: l.sticky ? 'sticky' : 'fixed', background: l.alpha <= 0.02 ? 'none' : `${Math.round(l.alpha * 100)}% opaque`, how, overlap_px: Math.round(area), texts: texts.slice(0, 4).map(t => t.slice(0, 80)) },
+        box: { x: Math.round(l.r.left), y: Math.round(l.r.top), width: Math.round(l.r.width), height: Math.round(l.r.height) } });
+    }
+  }
+  return { layers: layers.length, open: open.length, scrollers: scrollers.slice(0, 4).map(({ area, ...x }) => x), findings };
 };

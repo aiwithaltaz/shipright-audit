@@ -13,7 +13,8 @@ const PAGE = `<!doctype html>
   const home = () => {
     const nav = '<nav><a href="/">Home</a><a href="/projects">Projects</a><a href="/settings">Settings</a></nav>';
     const path = location.pathname;
-    if (path === '/projects') app.innerHTML = nav + '<h1>Projects</h1><ul><li>Garden plan</li><li>Budget 2026</li><li>Trip notes</li></ul>';
+    if (path === '/projects') app.innerHTML = nav + '<h1>Projects</h1><ul><li><a href="/projects/garden">Garden plan</a></li><li><a href="/projects/budget">Budget 2026</a></li><li><a href="/projects/trip">Trip notes</a></li></ul>';
+    else if (path.startsWith('/projects/')) app.innerHTML = nav + '<h1>' + path.split('/').pop() + '</h1><p>Last edited on Monday. Two people can see this project.</p>';
     else if (path === '/settings') app.innerHTML = nav + '<h1>Settings</h1><p>Language: English</p>';
     else app.innerHTML = nav + '<h1>Home</h1><p>Welcome back. 3 projects.</p>';
   };
@@ -28,9 +29,9 @@ const PAGE = `<!doctype html>
 </body>
 </html>`;
 
-export function startRotatingApp({ refuseHeadless = false } = {}) {
+export function startRotatingApp({ refuseHeadless = false, refreshDelay = 0 } = {}) {
   let valid = null;
-  const stats = { refresh_ok: 0, refresh_401: 0, logins: 0 };
+  const stats = { refresh_ok: 0, refresh_401: 0, refresh_lost: 0, logins: 0 };
   const issue = res => {
     valid = randomBytes(12).toString('hex');
     res.setHeader('set-cookie', `rt=${valid}; Path=/; Max-Age=3600; HttpOnly; SameSite=Lax`);
@@ -43,11 +44,15 @@ export function startRotatingApp({ refuseHeadless = false } = {}) {
     }
     if (url.pathname === '/api/auth/refresh' && req.method === 'POST') {
       const headless = refuseHeadless && /headless/i.test(req.headers['user-agent'] || '');
-      if (sent && sent === valid && !headless) { stats.refresh_ok++; issue(res); res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{"ok":true}'); }
+      if (sent && sent === valid && !headless) {
+        stats.refresh_ok++; issue(res);
+        const answer = () => { if (res.destroyed || req.destroyed) { stats.refresh_lost++; return; } res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}'); };
+        return refreshDelay ? setTimeout(answer, refreshDelay) : answer();
+      }
       stats.refresh_401++; res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"error":"token expired"}');
     }
     if (url.pathname.startsWith('/api/') || /\.\w+$/.test(url.pathname)) { res.writeHead(404); return res.end(); }
     res.writeHead(200, { 'content-type': 'text/html' }); res.end(PAGE);
   });
-  return new Promise(ok => server.listen(0, '127.0.0.1', () => ok({ server, stats, url: `http://127.0.0.1:${server.address().port}/`, stop: () => server.close() })));
+  return new Promise(ok => server.listen(0, '127.0.0.1', () => ok({ server, stats, url: `http://127.0.0.1:${server.address().port}/`, expire: () => { valid = null; }, stop: () => server.close() })));
 }

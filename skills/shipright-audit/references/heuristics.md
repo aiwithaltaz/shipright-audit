@@ -19,15 +19,15 @@ Check: labels use the user's words, not internal or technical terms. Order follo
 Pain example: a button says "Persist record" instead of "Save".
 
 **H3. Let users undo and exit.**
-Check: every flow has Back, Cancel or Close. Destructive actions offer undo or confirm.
+Check: every flow has Back, Cancel or Close. Destructive actions offer undo or confirm. Back goes back: an in-app back arrow lands on the page the user came from, from every page that leads there (`explore.mjs` tries each one from 2 pages and reports `back-goes-elsewhere`). An option that was offered stays offered: a theme switcher that shows System, Light and Dark still shows all 3 after one is picked (`option-vanished`).
 Pain example: a 5-step form has no Back button; a mistake means starting over.
 
 **H4. Be consistent.**
-Check: the same action has the same label, look and place everywhere. Platform patterns are followed.
+Check: the same action has the same label, look and place everywhere. Platform patterns are followed. The tabs of one section share one top: the content starts at the same height on each, and a back control or page title is on all of them or on none (`tab-shift`, `tab-chrome-differs`). One job has one control per screen: two buttons with different names that open the same list are a duplicate (`duplicate-on-screen`).
 Pain example: "Save" on one screen, "Submit" on another, for the same action.
 
 **H5. Prevent errors.**
-Check: invalid choices are blocked up front (disabled dates, input masks, limits shown). Requirements appear before the user starts, not at the end.
+Check: invalid choices are blocked up front (disabled dates, input masks, limits shown). Requirements appear before the user starts, not at the end. Before you call something a hidden requirement (an account, a key, a provider), search the page and its FAQ for words that say it is optional or one choice of several ("or", "any", "your own key", "optional"). If they are there, it is not a hidden requirement.
 Pain example: a date picker allows dates the business cannot serve.
 
 **H6. Show, do not make users remember.**

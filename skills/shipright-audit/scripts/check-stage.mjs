@@ -269,7 +269,7 @@ export function check(md, dir = null) {
     for (const f of findAll(dir, 'walk.json')) {
       try { const v = JSON.parse(readFileSync(f, 'utf8')); leads.push(...(v.leads || []).map(l => l.id)); scriptActions += (v.used_actions || []).length; } catch {}
     }
-    try { const ex = find(dir, 'explore.json'); if (ex) scriptActions += JSON.parse(readFileSync(ex, 'utf8')).use?.switches_flipped || 0; } catch {}
+    try { const ex = find(dir, 'explore.json'); if (ex) { const use = JSON.parse(readFileSync(ex, 'utf8')).use || {}; scriptActions += (use.switches_flipped || 0) + (use.option_picks || 0); } } catch {}
     // The owner's limits: when use-limits.json holds anything back, the header says so in the owner's words.
     const limitsFile = find(dir, 'use-limits.json');
     if (limitsFile) {
@@ -279,6 +279,13 @@ export function check(md, dir = null) {
       if (lim && (lim.held || []).length && usedYes && !usedLimits) errors.push(`use-limits.json holds back ${lim.held.length} action(s) the owner ruled out, but the header says "Used as a user: yes". Write: yes with limits: "<owner's words>" (N actions).`);
       if (lim && usedLimits && usedQuote && lim.owner_words && !loose(lim.owner_words).includes(loose(usedQuote)) && !loose(usedQuote).includes(loose(lim.owner_words))) errors.push('Header "Used as a user: yes with limits" must quote the owner\'s words exactly as they stand in use-limits.json ("owner_words").');
     }
+    // A dialog a script closed on load (a "What's new" notice) changed something for the owner: it may
+    // not show again. Left behind must name it, with how it was closed.
+    const closed = [];
+    for (const name of ['crawl.json', 'explore.json', 'visual.json', 'samples.json', 'consistency.json']) {
+      for (const f of findAll(dir, name)) { try { for (const d of (JSON.parse(readFileSync(f, 'utf8')).dialogs_closed || [])) if (d.how && !closed.some(c => c.dialog === d.dialog)) closed.push(d); } catch {} }
+    }
+    if (closed.length && !/dialog/i.test((sections['Left behind'] || []).join('\n'))) errors.push(`Left behind: the scripts closed ${closed.length === 1 ? 'a dialog' : `${closed.length} dialogs`} that covered a page (${closed.map(c => `"${c.dialog}" with ${c.how}`).join(', ')}). Name each one in Left behind, with how it was closed.`);
     if (scriptActions && !usedYes) errors.push(`Header says "Used as a user: no", but the scripts flipped switches or ran owner-approved steps (${scriptActions} action(s)). Write "Used as a user: yes (${scriptActions} actions)" and list them in Left behind.`);
     else if (scriptActions && usedCount < scriptActions) errors.push(`Header says "Used as a user: yes (${usedCount} actions)", but the scripts recorded ${scriptActions}. Count every flipped switch and every owner-approved step.`);
     leads = [...new Set(leads)];
@@ -498,6 +505,8 @@ function selfTest() {
     ['used: no fails when a walk recorded owner-approved steps', check(good, d3).some(e => e.includes('the scripts flipped switches or ran owner-approved steps (2 action(s))'))],
     ['a result lead from a walk must be decided', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n', d3).some(e => e.includes('W-send-1 not decided'))],
     ['a decided walk lead passes', check(listed + '\n## Script leads\n| Lead | Check | Decision |\n|---|---|---|\n| W-send-1 | media | P01 |\n', d3).length === 0],
+    ['option picks count as actions (new in 0.9)', (() => { const d = mkdtempSync(join(tmpdir(), 'gate-opt-')); for (const sub of ['screens', 'explore']) mkdirSync(join(d, sub)); for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d, f), ''); writeFileSync(join(d, 'explore/explore.json'), JSON.stringify({ leads: [], use: { switches_flipped: 2, option_picks: 3 } })); return check(listed.replace('yes (3 actions)', 'yes (5 actions)'), d).length === 0 && check(listed.replace('yes (3 actions)', 'yes (4 actions)'), d).some(e => e.includes('the scripts recorded 5')); })()],
+    ['a dialog a script closed must be named in Left behind (new in 0.9)', (() => { const d = mkdtempSync(join(tmpdir(), 'gate-dlg-')); for (const sub of ['screens', 'visual']) mkdirSync(join(d, sub)); for (const f of ['screens/home-1280.png', 'screens/book-1280.png', 'screens/home-390.png']) writeFileSync(join(d, f), ''); writeFileSync(join(d, 'visual/visual.json'), JSON.stringify({ leads: [], dialogs_closed: [{ page: '/', dialog: "What's new", how: 'Escape' }] })); return check(good, d).some(e => e.includes('closed a dialog that covered a page ("What\'s new" with Escape)')) && check(good.replace('- Nothing: no test data was created', '- Closed the "What\'s new" dialog with Escape. Nothing else: no test data was created'), d).length === 0; })()],
   );
   // The use-it question is waited for: "not answered" passes only when the session was unattended. A yes
   // with limits quotes the owner, and the header may not hide limits that use-limits.json holds.

@@ -81,6 +81,70 @@ export async function settle(page, { timeout = 10000 } = {}) {
   return false;
 }
 
+// ---- A dialog that covers the page when it loads ("What's new", a tour, a notice) ----------------
+// It hides the screen from every check, so it has to go. But how it is closed matters: pressing OK or
+// "Got it" often tells the app the owner has seen it, and then it never shows again on their account.
+// So the order is: Escape first, then the close (X) button, and a button named OK, Got it or Dismiss
+// only when neither worked. Nothing else is ever pressed: not Accept, not Agree, not Continue.
+// A dialog that asks for a password is the sign-in, not a notice: it is left alone. A dialog about
+// cookies, consent, privacy or terms is never answered with its own button: pressing OK there would
+// agree to something on the owner's behalf. Escape and the close (X) button are still tried.
+// Every dialog closed is kept in dialogsClosed, with how, so the audit can say so in Left behind.
+export const dialogsClosed = [];
+export async function uncover(page, name = 'audit') {
+  const find = () => page.evaluate(() => {
+    const vis = el => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 40 && r.height > 40 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05; };
+    const text = el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+    document.querySelectorAll('[data-srdialog], [data-srdialog-x], [data-srdialog-ok]').forEach(el => { delete el.dataset.srdialog; delete el.dataset.srdialogX; delete el.dataset.srdialogOk; });
+    const d = [...document.querySelectorAll('[role=dialog], [role=alertdialog], [aria-modal=true], dialog[open]')].filter(vis).pop();
+    if (!d || d.querySelector('input[type=password]')) return null;
+    d.dataset.srdialog = '1';
+    const by = (d.getAttribute('aria-labelledby') || '').split(/\s+/).map(id => document.getElementById(id)).filter(Boolean).map(text).join(' ');
+    const head = d.querySelector('h1, h2, h3, [role=heading]');
+    // The close (X) button: named close, or showing only an X.
+    const close = [...d.querySelectorAll('button, [role=button], a')].find(b => vis2(b) && (/^(close|close dialog|close modal)$/i.test((b.getAttribute('aria-label') || b.getAttribute('title') || '').trim()) || /^[x\u00d7\u2715\u2716\u2573]$/i.test(text(b)) || (!text(b) && /close|dismiss-icon|x-mark|xmark/i.test((typeof b.className === 'string' ? b.className : '') + ' ' + ((b.querySelector('svg, use, i') || { getAttribute: () => '' }).getAttribute('class') || '')))));
+    function vis2(el) { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+    if (close) close.dataset.srdialogX = '1';
+    const consent = /cookie|consent|privacy|gdpr|tracking|terms of|\bterms\b|agree/i.test(text(d));
+    const last = consent ? null : [...d.querySelectorAll('button, [role=button]')].find(b => vis2(b) && /^(ok|okay|got it|dismiss)[.!]?$/i.test(text(b)));
+    if (last) last.dataset.srdialogOk = '1';
+    return { title: (d.getAttribute('aria-label') || by || (head && text(head)) || text(d)).slice(0, 60), x: !!close, ok: last ? text(last) : null, consent };
+  }).catch(() => null);
+  const d = await find();
+  if (!d) return null;
+  const entry = { page: page.url(), dialog: d.title, how: null };
+  const gone = async () => { await page.waitForTimeout(350); const now = await find(); return !now || now.title !== d.title; };
+  await page.keyboard.press('Escape').catch(() => {});
+  if (await gone()) entry.how = 'Escape';
+  else if (d.x && await page.click('[data-srdialog-x="1"]', { timeout: 2000 }).then(() => true).catch(() => false) && await gone()) entry.how = 'the close (X) button';
+  else if (d.ok && await page.click('[data-srdialog-ok="1"]', { timeout: 2000 }).then(() => true).catch(() => false) && await gone()) entry.how = `the "${d.ok}" button`;
+  dialogsClosed.push(entry);
+  if (entry.how) console.error(`${name}: closed the "${d.title}" dialog that covered ${new URL(entry.page).pathname} with ${entry.how}. Say so in Left behind.`);
+  else console.error(`${name}: the "${d.title}" dialog covers ${new URL(entry.page).pathname} and did not close with Escape or a close (X) button${d.consent ? '. It asks for consent, so its own buttons were not pressed' : ', and it has no OK, Got it or Dismiss button'}. It was left open: the checks on this page may describe the dialog.`);
+  return entry;
+}
+// For a script's JSON, and the lines for its report.
+export const dialogList = (local = u => u) => dialogsClosed.map(d => ({ ...d, page: local(d.page) }));
+export function dialogNote(local = u => u) {
+  const list = dialogList(local);
+  if (!list.length) return [];
+  const pressed = list.filter(d => /button"?$/.test(d.how || '') && !/close \(X\)/.test(d.how));
+  return ['', '## Dialogs that covered a page', '',
+    'Closed in this order: Escape, then the close (X) button, then OK, Got it or Dismiss only when neither worked. **Name each one in Left behind, with how it was closed.**'
+    + (pressed.length ? ' A dialog closed with its own button may not show again on the owner\'s account: tell the owner.' : ''), '',
+    '| Page | Dialog | Closed with |', '| --- | --- | --- |',
+    ...list.map(d => `| ${d.page} | ${d.dialog.replace(/\|/g, '/')} | ${d.how || 'not closed: left open'} |`)];
+}
+
+// Where the pointer rests between actions: the bottom-right corner of the viewport. Not the top-left
+// corner (0, 0): a left rail or sidebar sits there, and a rail that opens on hover would stay open, so
+// its icons would be read with their words and never checked for a tooltip. On Linux the pointer also
+// starts at (0, 0), so it is parked before the controls of a page are listed, not only after a hover.
+export async function parkMouse(page) {
+  const size = page.viewportSize() || await page.evaluate(() => ({ width: innerWidth, height: innerHeight })).catch(() => null) || { width: 1280, height: 800 };
+  await page.mouse.move(Math.max(0, size.width - 1), Math.max(0, size.height - 1)).catch(() => {});
+}
+
 // One spelling per page, so "https://app.com" and "https://app.com/" are not audited twice.
 export function normUrl(u) {
   try { const x = new URL(u); if (x.pathname.length > 1) x.pathname = x.pathname.replace(/\/+$/, ''); return x.href; } catch { return u; }
@@ -258,6 +322,41 @@ async function checkSignedIn(context, url) {
   return { ok, page, refused, saw401: unauthorized[0] || null };
 }
 
+// Why a sign-in was lost mid-run (0.8, twice during explore, on an app that swaps its token on every
+// refresh): each page load asks the server for a new token. The server swaps the token the moment it
+// gets the request. If the script loads the next page, reloads, or closes the browser before the answer
+// is back, the browser never stores the new token, the old one is dead, and every later request gets 401.
+// explore.mjs did exactly that: it loaded a page and reloaded it at once.
+// The fix: before any page load, reload, back or close, wait until no request from the page is still
+// in flight. A stream that stays open (older than 6 seconds) is not waited for, and the wait is 5
+// seconds at most.
+function watchRequests(context) {
+  const open = new Map();
+  const unauthorized = [];
+  context.on('request', r => { if (['fetch', 'xhr', 'document'].includes(r.resourceType())) open.set(r, Date.now()); });
+  const done = r => open.delete(r);
+  context.on('requestfinished', done);
+  context.on('requestfailed', done);
+  context.on('response', r => { if (r.status() === 401) unauthorized.push(r.url().replace(/^https?:\/\/[^/]+/, '').split('?')[0].slice(0, 80)); });
+  const calm = async (max = 5000) => {
+    const start = Date.now();
+    while (Date.now() - start < max) {
+      const now = Date.now();
+      if (![...open.values()].some(began => now - began < 6000)) return true;
+      await new Promise(r => setTimeout(r, 40));
+    }
+    return false;
+  };
+  const guard = page => {
+    for (const m of ['goto', 'reload', 'goBack', 'goForward']) {
+      const real = page[m].bind(page);
+      page[m] = async (...a) => { await calm(); return real(...a); };
+    }
+  };
+  context.on('page', guard);
+  return { calm, guard, unauthorized };
+}
+
 // One way to open a browser context for every script:
 //   profile  reuse the sign-in window's browser profile (always holds the newest sign-in token)
 //   session  a session file saved by login.mjs (goes stale on apps that swap their token)
@@ -291,7 +390,27 @@ export async function openContext({ session, profile, viewport = { width: 1280, 
       continue;
     }
     let closed = false;
-    const close = async () => { if (closed) return; closed = true; await context.close().catch(() => {}); if (browser) await browser.close().catch(() => {}); };
+    const watch = plan.mode === 'none' ? null : watchRequests(context);
+    let signedInAt = -1; // how many 401 answers had been seen when the sign-in check passed (-1: it has not)
+    const close = async () => {
+      if (closed) return;
+      closed = true;
+      if (watch) {
+        await watch.calm(3000);
+        // Signed out during the run? Only looked at when the app answered 401 after the sign-in check.
+        if (url && signedInAt >= 0 && watch.unauthorized.length > signedInAt) {
+          const page = context.pages()[0];
+          const still = page ? await checkSignedIn(context, url).then(r => r.ok).catch(() => true) : true;
+          if (!still) {
+            console.error(`${name}: The app signed us out during this run (401 on ${watch.unauthorized[watch.unauthorized.length - 1]}). What this script recorded after that point came from the sign-in page. Run login.mjs again, then run this script again.`);
+            process.exitCode = SIGNED_OUT_EXIT;
+          }
+          await watch.calm(3000);
+        }
+      }
+      await context.close().catch(() => {});
+      if (browser) await browser.close().catch(() => {});
+    };
     // A profile only keeps the newest sign-in token if the browser closes cleanly. If the script is
     // stopped or crashes, close the browser first, or the next script would find a stale token.
     if (plan.mode === 'profile') {
@@ -306,6 +425,7 @@ export async function openContext({ session, profile, viewport = { width: 1280, 
     const res = await checkSignedIn(context, url);
     if (res.ok) {
       console.error(`${name}: signed in with ${label}${tried.length ? ` (after trying ${tried.map(t => t.label).join(', then ')})` : ''}`);
+      if (watch) { watch.guard(res.page); signedInAt = watch.unauthorized.length; }
       return { ...base, page: res.page };
     }
     tried.push({ label, refused: res.refused, saw401: res.saw401 });
@@ -377,6 +497,45 @@ let analyzeSrc = null;
 export function analyzeScript(opts = {}) {
   analyzeSrc ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'analyze-page.js'), 'utf8');
   return `(() => { ${analyzeSrc}\n return SHIPRIGHT_ANALYZE(${JSON.stringify(opts)}); })()`;
+}
+
+// Sticky and fixed layers need a solid background (analyze-page.js, SHIPRIGHT_LAYERS). The check reads
+// the page as it is scrolled, so this scrolls the content under each layer first: a few stops down the
+// page and down every box that scrolls. A bar that turns solid once the page scrolls gets the time to
+// do so. Each lead is screenshotted while the content is under the layer, then the scroll is put back.
+// shotFor(finding) gives the file to write. Returns the findings (kind "see-through-layer").
+export async function checkLayers(page, shotFor) {
+  analyzeSrc ??= readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'analyze-page.js'), 'utf8');
+  const script = `(() => { ${analyzeSrc}\n return SHIPRIGHT_LAYERS(); })()`;
+  const first = await page.evaluate(script).catch(() => null);
+  if (!first || !first.open || !first.scrollers.length) return [];
+  const scrollTo = ([mark, y]) => { const el = mark === 'document' ? (document.scrollingElement || document.documentElement) : document.querySelector(`[data-srs="${mark}"]`); if (el) el.scrollTop = y; };
+  const best = new Map();
+  for (const sc of first.scrollers) {
+    const stops = [...new Set([0, 80, 200, sc.max / 2, sc.max - 200, sc.max - 80, sc.max].map(v => Math.round(Math.max(0, Math.min(sc.max, v)))))];
+    for (const top of stops) {
+      await page.evaluate(scrollTo, [sc.mark, top]).catch(() => {});
+      await page.waitForTimeout(220);
+      const res = await page.evaluate(script).catch(() => null);
+      for (const f of (res ? res.findings : [])) { const have = best.get(f.mark); if (!have || f.detail.overlap_px > have.f.detail.overlap_px) best.set(f.mark, { f, sc, top }); }
+    }
+    await page.evaluate(scrollTo, [sc.mark, sc.top]).catch(() => {});
+  }
+  const out = [];
+  for (const { f, sc, top } of best.values()) {
+    await page.evaluate(scrollTo, [sc.mark, top]).catch(() => {});
+    await page.waitForTimeout(220);
+    const size = page.viewportSize() || { width: 1280, height: 800 };
+    const box = await page.evaluate(m => { const el = document.querySelector(`[data-srlayer="${m}"]`); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; }, f.mark).catch(() => null) || f.box;
+    const y = Math.max(0, box.y - 60), x = Math.max(0, box.x - 12);
+    const clip = { x, y, width: Math.max(2, Math.min(size.width - x, box.width + 24)), height: Math.max(2, Math.min(size.height - y, box.height + 120)) };
+    const file = shotFor ? shotFor(f) : null;
+    const shot = file ? await page.screenshot({ path: file, clip }).then(() => true).catch(() => false) : false;
+    await page.evaluate(scrollTo, [sc.mark, sc.top]).catch(() => {});
+    const { box: _b, mark: _m, ...rest } = f;
+    out.push({ ...rest, detail: { ...f.detail, scrolled_to: top }, shot_written: shot });
+  }
+  return out;
 }
 
 // The crop for a finding: its own box when the check gave one (a problem wider than one element, like
